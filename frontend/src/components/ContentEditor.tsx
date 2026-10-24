@@ -41,19 +41,20 @@ export function ContentEditor({
   const canSave = status === "draft" || status === "changes_requested";
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-      <h2 className="text-xs uppercase text-slate-500 font-medium mb-4">
-        Content
-      </h2>
-
-      {/* Load sample button */}
-      <button
-        onClick={onLoadSample}
-        disabled={disabled || isLocked}
-        className="mb-3 text-sm text-indigo-600 hover:text-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Load sample
-      </button>
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold text-slate-900">
+          Content
+        </h2>
+        {/* Load sample button */}
+        <button
+          onClick={onLoadSample}
+          disabled={disabled || isLocked}
+          className="text-sm text-blue-600 hover:text-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors"
+        >
+          📄 Load Sample
+        </button>
+      </div>
 
       {/* Textarea */}
       <textarea
@@ -61,60 +62,66 @@ export function ContentEditor({
         onChange={(e) => onChange(e.target.value)}
         disabled={isLocked}
         placeholder="Paste your marketing content here..."
-        className="w-full h-72 p-3 border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
+        className="w-full h-80 p-4 border-2 border-slate-300 rounded-xl resize-none focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 disabled:bg-slate-50 disabled:cursor-not-allowed text-base transition-all"
         maxLength={5000}
       />
 
       {/* Character counter */}
-      <div className="text-right text-sm text-slate-500 mt-1">
-        {charCount} / 5000
+      <div className="text-right text-sm font-medium text-slate-500 mt-2">
+        {charCount} / 5000 characters
       </div>
 
       {/* Run brand review button */}
       <button
         onClick={onAnalyze}
         disabled={!content.trim() || disabled || loading || isLocked}
-        className="w-full mt-4 bg-indigo-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 px-6 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-blue-800 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all"
       >
         {loading ? (
           <>
-            <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            Analyzing...
+            <span className="inline-block w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></span>
+            Analyzing Content...
           </>
         ) : (
-          "Run brand review"
+          <>
+            <span>🔍</span>
+            Run Brand Review
+          </>
         )}
       </button>
 
       {/* Slow server message */}
       {slowServer && (
-        <p className="mt-3 text-sm text-amber-600">
-          Server is waking up, please wait...
-        </p>
+        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
+          <span className="text-2xl">⏳</span>
+          <p className="text-sm text-amber-700 font-medium">
+            Server is waking up, please wait...
+          </p>
+        </div>
       )}
 
       {/* Error message with retry button */}
       {error && (
-        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
-          <p className="text-sm text-red-700 mb-2">{error}</p>
+        <div className="mt-4 bg-red-50 border-2 border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-700 mb-3 font-medium">{error}</p>
           <button
             onClick={onRetry}
-            className="text-sm text-red-600 hover:text-red-700 font-medium"
+            className="text-sm text-white bg-red-600 hover:bg-red-700 font-semibold px-4 py-2 rounded-lg transition-colors"
           >
-            Try again
+            🔄 Try Again
           </button>
         </div>
       )}
 
       {/* Action buttons */}
-      <div className="mt-4 space-y-2">
+      <div className="mt-6 space-y-3">
         {canSave && (
           <button
             onClick={onSave}
             disabled={saving || !content.trim()}
-            className="w-full bg-slate-100 text-slate-700 py-2 px-4 rounded-lg font-medium hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-slate-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "💾 Saving..." : "💾 Save Draft"}
           </button>
         )}
 
@@ -122,44 +129,47 @@ export function ContentEditor({
           <button
             onClick={onSubmit}
             disabled={saving || !content.trim()}
-            className="w-full bg-indigo-100 text-indigo-700 py-2 px-4 rounded-lg font-medium hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-indigo-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
           >
-            Submit for approval
+            ✓ Submit for Approval
           </button>
         )}
 
         <button
           onClick={onNewReview}
           disabled={saving}
-          className="w-full bg-slate-100 text-slate-700 py-2 px-4 rounded-lg font-medium hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full bg-slate-200 text-slate-700 py-3 px-6 rounded-xl font-semibold hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
-          New review
+          ➕ New Review
         </button>
       </div>
 
       {/* Saved timestamp */}
       {savedAt && (
-        <p className="mt-2 text-sm text-slate-500 text-center">
-          Saved at {savedAt}
+        <p className="mt-3 text-sm text-green-600 text-center font-medium bg-green-50 py-2 rounded-lg border border-green-200">
+          ✓ Saved at {savedAt}
         </p>
       )}
 
       {/* Status notices */}
       {status === "pending_approval" && (
-        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
-          Waiting for approver.
+        <div className="mt-4 bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-sm text-amber-800 font-medium flex items-center gap-3">
+          <span className="text-2xl">⏳</span>
+          <span>Waiting for approver review</span>
         </div>
       )}
 
       {status === "approved" && (
-        <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
-          Approved. Editing is locked.
+        <div className="mt-4 bg-green-50 border-2 border-green-300 rounded-xl p-4 text-sm text-green-800 font-medium flex items-center gap-3">
+          <span className="text-2xl">✅</span>
+          <span>Approved. Editing is locked.</span>
         </div>
       )}
 
       {status === "changes_requested" && (
-        <div className="mt-3 bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700">
-          Changes requested. Please revise and resubmit.
+        <div className="mt-4 bg-orange-50 border-2 border-orange-300 rounded-xl p-4 text-sm text-orange-800 font-medium flex items-center gap-3">
+          <span className="text-2xl">📝</span>
+          <span>Changes requested. Please revise and resubmit.</span>
         </div>
       )}
     </div>

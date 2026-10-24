@@ -211,42 +211,45 @@ function App() {
 
   // Status badge styling
   const statusStyles = {
-    draft: "bg-slate-100 text-slate-700",
-    pending_approval: "bg-amber-100 text-amber-700",
-    approved: "bg-green-100 text-green-700",
-    changes_requested: "bg-orange-100 text-orange-700",
+    draft: "bg-slate-100 text-slate-700 border border-slate-300",
+    pending_approval: "bg-amber-50 text-amber-700 border border-amber-300",
+    approved: "bg-green-50 text-green-700 border border-green-300",
+    changes_requested: "bg-orange-50 text-orange-700 border border-orange-300",
   };
 
   const isLocked = reviewStatus === "approved";
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">🛡️ BrandGuard AI</h1>
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">🛡️ BrandGuard AI</h1>
+            <p className="text-slate-600">Ensure brand compliance with AI-powered content review</p>
+          </div>
           <div className="flex items-center gap-4">
             <span
-              className={`px-3 py-1 rounded-full text-sm font-medium ${
+              className={`px-4 py-2 rounded-full text-sm font-semibold shadow-sm ${
                 statusStyles[reviewStatus]
               }`}
             >
-              {reviewStatus.replace("_", " ")}
+              {reviewStatus.replace("_", " ").toUpperCase()}
             </span>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-slate-700 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
               <input
                 type="checkbox"
                 checked={isApproverMode}
                 onChange={(e) => setIsApproverMode(e.target.checked)}
-                className="rounded"
+                className="rounded text-blue-600 focus:ring-2 focus:ring-blue-500"
               />
-              Approver mode
+              <span className="font-medium">Approver mode</span>
             </label>
           </div>
         </div>
 
         {/* Two column layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left: Content Editor */}
           <ContentEditor
             content={content}
@@ -267,16 +270,23 @@ function App() {
           />
 
           {/* Right: Findings */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-xs uppercase text-slate-500 font-medium mb-4">
-              Findings
-            </h2>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-slate-900">
+                Findings
+              </h2>
+              {hasAnalyzed && findings.length > 0 && (
+                <span className="text-sm font-medium text-slate-600">
+                  {findings.length} {findings.length === 1 ? 'issue' : 'issues'}
+                </span>
+              )}
+            </div>
 
             {/* Before first run */}
             {!hasAnalyzed && !loading && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="text-6xl mb-4">🛡️</div>
-                <p className="text-slate-600">
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="text-7xl mb-4">🛡️</div>
+                <p className="text-slate-600 text-lg">
                   Paste your content and run a review to see findings here.
                 </p>
               </div>
@@ -284,39 +294,37 @@ function App() {
 
             {/* Loading state */}
             {loading && (
-              <div className="space-y-3">
-                <div className="h-32 bg-slate-200 rounded-lg animate-pulse"></div>
-                <div className="h-32 bg-slate-200 rounded-lg animate-pulse"></div>
+              <div className="space-y-4">
+                <div className="h-40 bg-gradient-to-r from-slate-100 to-slate-200 rounded-xl animate-pulse"></div>
+                <div className="h-40 bg-gradient-to-r from-slate-100 to-slate-200 rounded-xl animate-pulse"></div>
               </div>
             )}
 
             {/* Zero findings */}
             {hasAnalyzed && !loading && findings.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="text-6xl mb-4">✅</div>
-                <p className="text-green-700 font-medium">No brand issues found</p>
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="text-7xl mb-4">✅</div>
+                <p className="text-green-700 font-semibold text-lg">No brand issues found</p>
+                <p className="text-slate-600 mt-2">Your content meets all brand guidelines</p>
               </div>
             )}
 
             {/* Findings list */}
             {hasAnalyzed && !loading && findings.length > 0 && (
               <>
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-slate-700 font-medium">
-                    {findings.length} issues detected
+                <div className="flex items-center gap-2 mb-6 flex-wrap">
+                  <span className="px-3 py-1.5 bg-red-50 text-red-700 text-sm font-semibold rounded-lg border border-red-200">
+                    {findings.filter((f) => f.severity === "high").length} High
                   </span>
-                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
-                    {findings.filter((f) => f.severity === "high").length} high
+                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 text-sm font-semibold rounded-lg border border-amber-200">
+                    {findings.filter((f) => f.severity === "medium").length} Medium
                   </span>
-                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">
-                    {findings.filter((f) => f.severity === "medium").length} medium
-                  </span>
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
-                    {findings.filter((f) => f.severity === "low").length} low
+                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 text-sm font-semibold rounded-lg border border-blue-200">
+                    {findings.filter((f) => f.severity === "low").length} Low
                   </span>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {findings.map((finding) => (
                     <FindingCard
                       key={finding.id}
@@ -335,52 +343,52 @@ function App() {
 
         {/* Compliance Sign-off */}
         {hasAnalyzed && findings.length > 0 && (
-          <div className="mt-6 max-w-2xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-xs uppercase text-slate-500 font-medium mb-3">
+          <div className="mt-8 max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
+            <h2 className="text-xl font-bold text-slate-900 mb-6">
               Compliance Sign-off
             </h2>
 
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-lg font-medium text-slate-900">
-                Compliance score:{" "}
-                <span
-                  className={
-                    complianceScore >= 70
-                      ? "text-green-600"
-                      : complianceScore >= 40
-                      ? "text-amber-600"
-                      : "text-red-600"
-                  }
-                >
-                  {complianceScore}%
-                </span>
+            <div className="flex items-center justify-between mb-6 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+              <span className="text-lg font-semibold text-slate-900">
+                Compliance Score
+              </span>
+              <span
+                className={`text-4xl font-bold ${
+                  complianceScore >= 70
+                    ? "text-green-600"
+                    : complianceScore >= 40
+                    ? "text-amber-600"
+                    : "text-red-600"
+                }`}
+              >
+                {complianceScore}%
               </span>
             </div>
 
-            <p className="text-sm text-slate-600 mb-4">
+            <p className="text-base text-slate-700 mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
               {complianceScore >= 70
-                ? "Content meets brand compliance standards."
+                ? "✅ Content meets brand compliance standards and is ready for approval."
                 : complianceScore >= 40
-                ? "Content needs some improvements to meet brand standards."
-                : "Content requires significant revision before approval."}
+                ? "⚠️ Content needs some improvements to meet brand standards."
+                : "❌ Content requires significant revision before approval."}
             </p>
 
             {/* Approver actions */}
             {isApproverMode && reviewStatus === "pending_approval" && (
-              <div className="flex gap-3">
+              <div className="flex gap-4">
                 <button
                   onClick={handleApprove}
                   disabled={saving}
-                  className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 bg-green-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
                 >
-                  Approve
+                  ✓ Approve
                 </button>
                 <button
                   onClick={handleRequestChanges}
                   disabled={saving}
-                  className="flex-1 bg-orange-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
                 >
-                  Request changes
+                  ← Request Changes
                 </button>
               </div>
             )}

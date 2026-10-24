@@ -17,26 +17,26 @@ export function FindingCard({
   disabled,
 }: FindingCardProps) {
   const severityColors = {
-    high: "bg-red-100 text-red-700 border-red-200",
-    medium: "bg-amber-100 text-amber-700 border-amber-200",
-    low: "bg-blue-100 text-blue-700 border-blue-200",
+    high: "bg-red-50 text-red-700 border-red-300",
+    medium: "bg-amber-50 text-amber-700 border-amber-300",
+    low: "bg-blue-50 text-blue-700 border-blue-300",
   };
 
   const quoteColors = {
-    high: "border-red-300",
-    medium: "border-amber-300",
-    low: "border-blue-300",
+    high: "border-red-400 bg-red-50",
+    medium: "border-amber-400 bg-amber-50",
+    low: "border-blue-400 bg-blue-50",
   };
 
   return (
     <div
-      className={`bg-white border border-slate-200 rounded-lg p-4 ${
-        decision !== "pending" ? "opacity-60" : ""
+      className={`bg-gradient-to-br from-white to-slate-50 border-2 border-slate-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all ${
+        decision !== "pending" ? "opacity-70" : ""
       }`}
     >
       {/* Severity badge */}
       <span
-        className={`inline-block px-2 py-1 text-xs font-medium rounded border ${
+        className={`inline-block px-4 py-1.5 text-xs font-bold rounded-lg border-2 ${
           severityColors[finding.severity]
         }`}
       >
@@ -45,59 +45,65 @@ export function FindingCard({
 
       {/* Evidence quote */}
       <div
-        className={`mt-3 pl-3 border-l-4 ${quoteColors[finding.severity]} py-1`}
+        className={`mt-4 pl-4 pr-4 py-3 border-l-4 rounded-r-lg ${quoteColors[finding.severity]}`}
       >
-        <p className="text-sm text-slate-700 italic">"{finding.evidence}"</p>
+        <p className="text-sm text-slate-800 italic font-medium">"{finding.evidence}"</p>
       </div>
 
       {/* Explanation */}
-      <div className="mt-3">
-        <p className="text-xs font-medium text-slate-500 uppercase mb-1">
+      <div className="mt-4">
+        <p className="text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
           Why it matters
         </p>
-        <p className="text-sm text-slate-700">{finding.explanation}</p>
+        <p className="text-sm text-slate-700 leading-relaxed">{finding.explanation}</p>
       </div>
 
       {/* Suggestion */}
-      <div className="mt-3 bg-green-50 border border-green-200 rounded p-3">
-        <p className="text-xs font-medium text-green-700 uppercase mb-1">
-          Suggested rewrite
+      <div className="mt-4 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-4">
+        <p className="text-xs font-bold text-green-800 uppercase mb-2 tracking-wide">
+          ✨ Suggested rewrite
         </p>
-        <p className="text-sm text-green-800">{finding.suggestion}</p>
+        <p className="text-sm text-green-900 font-medium">{finding.suggestion}</p>
       </div>
 
       {/* Action buttons or decision status */}
       {decision === "pending" && (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-5 flex gap-3">
           <button
             onClick={onApply}
             disabled={disabled}
-            className="flex-1 bg-indigo-600 text-white py-2 px-3 rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-4 rounded-lg text-sm font-bold hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
           >
-            Apply
+            ✓ Apply
           </button>
           <button
             onClick={onReject}
             disabled={disabled}
-            className="flex-1 bg-white border border-slate-300 text-slate-700 py-2 px-3 rounded text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-white border-2 border-slate-300 text-slate-700 py-3 px-4 rounded-lg text-sm font-bold hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            Reject
+            ✗ Reject
           </button>
         </div>
       )}
 
       {decision === "applied" && (
-        <div className="mt-3 bg-green-50 border border-green-200 rounded p-2">
-          <p className="text-sm text-green-700 font-medium">Applied ✓</p>
-          <p className="text-xs text-green-600 mt-1">
+        <div className="mt-4 bg-green-50 border-2 border-green-300 rounded-lg p-4">
+          <p className="text-sm text-green-800 font-bold flex items-center gap-2">
+            <span className="text-lg">✅</span>
+            Applied Successfully
+          </p>
+          <p className="text-xs text-green-700 mt-2">
             Replaced with: {finding.suggestion}
           </p>
         </div>
       )}
 
       {decision === "rejected" && (
-        <div className="mt-3 bg-slate-100 border border-slate-200 rounded p-2">
-          <p className="text-sm text-slate-600 font-medium">Rejected</p>
+        <div className="mt-4 bg-slate-100 border-2 border-slate-300 rounded-lg p-4">
+          <p className="text-sm text-slate-700 font-bold flex items-center gap-2">
+            <span className="text-lg">❌</span>
+            Rejected
+          </p>
         </div>
       )}
     </div>
