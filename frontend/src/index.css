@@ -1,3 +1,33 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+	font-family: "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+	color: #1c2d25;
+	background: #f3f6f4;
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	--page: #f3f6f4;
+	--surface: #ffffff;
+	--line: #dfe7e2;
+	--ink: #1c2d25;
+	--ink-soft: #3f5148;
+	--muted: #75827b;
+	--green: #187a58;
+	--green-hover: #126648;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { min-width: 320px; min-height: 100%; background: var(--page); }
+
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+
+button, textarea, input { font: inherit; }
+
+::selection { color: #123c2b; background: #bde3cc; }
+
+:focus-visible { outline-color: #17815e; }
