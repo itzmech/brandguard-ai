@@ -41,87 +41,73 @@ export function ContentEditor({
   const canSave = status === "draft" || status === "changes_requested";
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-slate-900">
-          Content
-        </h2>
-        {/* Load sample button */}
+    <section className="panel editor-panel" aria-labelledby="content-title">
+      <div className="panel-heading">
+        <div>
+          <h2 id="content-title">Content</h2>
+          <p className="panel-subtitle">Draft or paste copy for review</p>
+        </div>
         <button
           onClick={onLoadSample}
           disabled={disabled || isLocked}
-          className="text-sm text-blue-600 hover:text-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors"
+          className="button button-tertiary"
         >
-          📄 Load Sample
+          Load sample
         </button>
       </div>
 
-      {/* Textarea */}
-      <textarea
-        value={content}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={isLocked}
-        placeholder="Paste your marketing content here..."
-        className="w-full h-80 p-4 border-2 border-slate-300 rounded-xl resize-none focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 disabled:bg-slate-50 disabled:cursor-not-allowed text-base transition-all"
-        maxLength={5000}
-      />
-
-      {/* Character counter */}
-      <div className="text-right text-sm font-medium text-slate-500 mt-2">
-        {charCount} / 5000 characters
+      <div className="field-group">
+        <label className="field-label" htmlFor="review-content">Content to review</label>
+        <textarea
+          id="review-content"
+          value={content}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={isLocked}
+          placeholder="Paste your marketing content here..."
+          maxLength={5000}
+          aria-describedby="character-count"
+        />
+        <div className="field-footer">
+          {isLocked ? <span>Approved content is locked.</span> : <span>Maximum 5,000 characters</span>}
+          <span id="character-count" className="character-count">{charCount.toLocaleString()} / 5,000</span>
+        </div>
       </div>
 
-      {/* Run brand review button */}
       <button
         onClick={onAnalyze}
         disabled={!content.trim() || disabled || loading || isLocked}
-        className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 px-6 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-blue-800 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all"
+        className="button button-primary analyze-button"
       >
-        {loading ? (
-          <>
-            <span className="inline-block w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></span>
-            Analyzing Content...
-          </>
-        ) : (
-          <>
-            <span>🔍</span>
-            Run Brand Review
-          </>
-        )}
+        {loading ? <><span className="button-spinner" aria-hidden="true" />Analyzing content...</> : "Run brand review"}
       </button>
 
-      {/* Slow server message */}
       {slowServer && (
-        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
-          <span className="text-2xl">⏳</span>
-          <p className="text-sm text-amber-700 font-medium">
-            Server is waking up, please wait...
-          </p>
+        <div className="notice notice-warning" role="status">
+          <span className="notice-indicator" aria-hidden="true" />
+          <p>Server is waking up. Please wait...</p>
         </div>
       )}
 
-      {/* Error message with retry button */}
       {error && (
-        <div className="mt-4 bg-red-50 border-2 border-red-200 rounded-xl p-4">
-          <p className="text-sm text-red-700 mb-3 font-medium">{error}</p>
+        <div className="notice notice-error" role="alert">
+          <p>{error}</p>
           <button
             onClick={onRetry}
-            className="text-sm text-white bg-red-600 hover:bg-red-700 font-semibold px-4 py-2 rounded-lg transition-colors"
+            className="button button-danger"
           >
-            🔄 Try Again
+            Try again
           </button>
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="mt-6 space-y-3">
+      <div className="editor-actions">
         {canSave && (
           <button
             onClick={onSave}
             disabled={saving || !content.trim()}
-            className="w-full bg-slate-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
+            className="button button-secondary"
           >
-            {saving ? "💾 Saving..." : "💾 Save Draft"}
+            {saving ? "Saving..." : "Save draft"}
           </button>
         )}
 
@@ -129,49 +115,47 @@ export function ContentEditor({
           <button
             onClick={onSubmit}
             disabled={saving || !content.trim()}
-            className="w-full bg-indigo-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
+            className="button button-secondary"
           >
-            ✓ Submit for Approval
+            Submit for approval
           </button>
         )}
 
         <button
           onClick={onNewReview}
           disabled={saving}
-          className="w-full bg-slate-200 text-slate-700 py-3 px-6 rounded-xl font-semibold hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="button button-quiet"
         >
-          ➕ New Review
+          New review
         </button>
       </div>
 
-      {/* Saved timestamp */}
       {savedAt && (
-        <p className="mt-3 text-sm text-green-600 text-center font-medium bg-green-50 py-2 rounded-lg border border-green-200">
-          ✓ Saved at {savedAt}
+        <p className="save-confirmation" role="status">
+          Saved at {savedAt}
         </p>
       )}
 
-      {/* Status notices */}
       {status === "pending_approval" && (
-        <div className="mt-4 bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-sm text-amber-800 font-medium flex items-center gap-3">
-          <span className="text-2xl">⏳</span>
-          <span>Waiting for approver review</span>
+        <div className="notice notice-warning" role="status">
+          <span className="notice-indicator" aria-hidden="true" />
+          <p>Waiting for approver review</p>
         </div>
       )}
 
       {status === "approved" && (
-        <div className="mt-4 bg-green-50 border-2 border-green-300 rounded-xl p-4 text-sm text-green-800 font-medium flex items-center gap-3">
-          <span className="text-2xl">✅</span>
-          <span>Approved. Editing is locked.</span>
+        <div className="notice notice-success" role="status">
+          <span className="notice-indicator" aria-hidden="true" />
+          <p>Approved. Editing is locked.</p>
         </div>
       )}
 
       {status === "changes_requested" && (
-        <div className="mt-4 bg-orange-50 border-2 border-orange-300 rounded-xl p-4 text-sm text-orange-800 font-medium flex items-center gap-3">
-          <span className="text-2xl">📝</span>
-          <span>Changes requested. Please revise and resubmit.</span>
+        <div className="notice notice-warning" role="status">
+          <span className="notice-indicator" aria-hidden="true" />
+          <p>Changes requested. Please revise and resubmit.</p>
         </div>
       )}
-    </div>
+    </section>
   );
 }

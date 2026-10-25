@@ -4,6 +4,7 @@ import * as api from "./api";
 import { ContentEditor } from "./components/ContentEditor";
 import { FindingCard } from "./components/FindingCard";
 import { samples } from "./sampleContent";
+import "./App.css";
 
 function App() {
   // Main state
@@ -209,48 +210,45 @@ function App() {
 
   const complianceScore = calculateComplianceScore();
 
-  // Status badge styling
-  const statusStyles = {
-    draft: "bg-slate-100 text-slate-700 border border-slate-300",
-    pending_approval: "bg-amber-50 text-amber-700 border border-amber-300",
-    approved: "bg-green-50 text-green-700 border border-green-300",
-    changes_requested: "bg-orange-50 text-orange-700 border border-orange-300",
-  };
-
   const isLocked = reviewStatus === "approved";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+    <div className="app-shell">
+      <header className="app-topbar">
+        <div className="brand-lockup" aria-label="BrandGuard AI">
+          <span className="brand-mark" aria-hidden="true">B</span>
+          <span className="brand-name">BrandGuard <span>AI</span></span>
+        </div>
+        <div className="workspace-label">
+          <span className="workspace-indicator" aria-hidden="true" />
+          Review workspace
+        </div>
+      </header>
+
+      <main className="page-container">
+        <section className="page-heading">
           <div>
-            <h1 className="text-4xl font-bold text-slate-900 mb-2">🛡️ BrandGuard AI</h1>
-            <p className="text-slate-600">Ensure brand compliance with AI-powered content review</p>
+            <h1>Content review</h1>
+            <p>Ensure brand compliance with AI-powered content review.</p>
           </div>
-          <div className="flex items-center gap-4">
-            <span
-              className={`px-4 py-2 rounded-full text-sm font-semibold shadow-sm ${
-                statusStyles[reviewStatus]
-              }`}
-            >
-              {reviewStatus.replace("_", " ").toUpperCase()}
+          <div className="review-controls">
+            <span className={`status-badge status-${reviewStatus}`}>
+              <span className="status-dot" aria-hidden="true" />
+              {reviewStatus.replaceAll("_", " ")}
             </span>
-            <label className="flex items-center gap-2 text-sm text-slate-700 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
+            <label className="approver-toggle">
               <input
                 type="checkbox"
                 checked={isApproverMode}
                 onChange={(e) => setIsApproverMode(e.target.checked)}
-                className="rounded text-blue-600 focus:ring-2 focus:ring-blue-500"
               />
-              <span className="font-medium">Approver mode</span>
+              <span className="toggle-track" aria-hidden="true"><span /></span>
+              <span>Approver mode</span>
             </label>
           </div>
-        </div>
+        </section>
 
-        {/* Two column layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Content Editor */}
+        <div className="workspace-grid">
           <ContentEditor
             content={content}
             onChange={setContent}
@@ -269,62 +267,61 @@ function App() {
             savedAt={savedAt}
           />
 
-          {/* Right: Findings */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-slate-900">
-                Findings
-              </h2>
+          <section className="panel findings-panel" aria-labelledby="findings-title">
+            <div className="panel-heading">
+              <div>
+                <h2 id="findings-title">Review findings</h2>
+                <p className="panel-subtitle">Issues detected in your content</p>
+              </div>
               {hasAnalyzed && findings.length > 0 && (
-                <span className="text-sm font-medium text-slate-600">
-                  {findings.length} {findings.length === 1 ? 'issue' : 'issues'}
+                <span className="finding-count">
+                  {findings.length} {findings.length === 1 ? "finding" : "findings"}
                 </span>
               )}
             </div>
 
-            {/* Before first run */}
             {!hasAnalyzed && !loading && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="text-7xl mb-4">🛡️</div>
-                <p className="text-slate-600 text-lg">
-                  Paste your content and run a review to see findings here.
-                </p>
+              <div className="empty-state">
+                <span className="empty-mark" aria-hidden="true"><span /><span /><span /></span>
+                <h3>Ready when you are</h3>
+                <p>Run a review to see potential compliance issues and suggested revisions here.</p>
               </div>
             )}
 
-            {/* Loading state */}
             {loading && (
-              <div className="space-y-4">
-                <div className="h-40 bg-gradient-to-r from-slate-100 to-slate-200 rounded-xl animate-pulse"></div>
-                <div className="h-40 bg-gradient-to-r from-slate-100 to-slate-200 rounded-xl animate-pulse"></div>
+              <div className="loading-state" role="status" aria-label="Reviewing content">
+                <div className="skeleton-line skeleton-short" />
+                <div className="skeleton-line" />
+                <div className="skeleton-line skeleton-medium" />
+                <div className="skeleton-block" />
+                <div className="skeleton-line skeleton-short" />
+                <div className="skeleton-line" />
+                <div className="skeleton-block" />
               </div>
             )}
 
-            {/* Zero findings */}
             {hasAnalyzed && !loading && findings.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="text-7xl mb-4">✅</div>
-                <p className="text-green-700 font-semibold text-lg">No brand issues found</p>
-                <p className="text-slate-600 mt-2">Your content meets all brand guidelines</p>
+              <div className="empty-state success-state">
+                <span className="success-mark" aria-hidden="true">✓</span>
+                <h3>No brand issues found</h3>
+                <p>Your content meets all brand guidelines.</p>
               </div>
             )}
 
-            {/* Findings list */}
             {hasAnalyzed && !loading && findings.length > 0 && (
               <>
-                <div className="flex items-center gap-2 mb-6 flex-wrap">
-                  <span className="px-3 py-1.5 bg-red-50 text-red-700 text-sm font-semibold rounded-lg border border-red-200">
-                    {findings.filter((f) => f.severity === "high").length} High
-                  </span>
-                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 text-sm font-semibold rounded-lg border border-amber-200">
-                    {findings.filter((f) => f.severity === "medium").length} Medium
-                  </span>
-                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 text-sm font-semibold rounded-lg border border-blue-200">
-                    {findings.filter((f) => f.severity === "low").length} Low
-                  </span>
+                <div className="severity-summary" aria-label="Findings by severity">
+                  {(["high", "medium", "low"] as const).map((severity) => (
+                    <span className={`severity-total severity-${severity}`} key={severity}>
+                      <span className="severity-total-count">
+                        {findings.filter((finding) => finding.severity === severity).length}
+                      </span>
+                      <span>{severity}</span>
+                    </span>
+                  ))}
                 </div>
 
-                <div className="space-y-4">
+                <div className="findings-list">
                   {findings.map((finding) => (
                     <FindingCard
                       key={finding.id}
@@ -338,63 +335,56 @@ function App() {
                 </div>
               </>
             )}
-          </div>
+          </section>
         </div>
 
-        {/* Compliance Sign-off */}
         {hasAnalyzed && findings.length > 0 && (
-          <div className="mt-8 max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-lg p-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-6">
-              Compliance Sign-off
-            </h2>
-
-            <div className="flex items-center justify-between mb-6 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
-              <span className="text-lg font-semibold text-slate-900">
-                Compliance Score
-              </span>
-              <span
-                className={`text-4xl font-bold ${
-                  complianceScore >= 70
-                    ? "text-green-600"
-                    : complianceScore >= 40
-                    ? "text-amber-600"
-                    : "text-red-600"
-                }`}
-              >
-                {complianceScore}%
-              </span>
+          <section className="panel signoff-panel" aria-labelledby="signoff-title">
+            <div className="signoff-header">
+              <div>
+                <h2 id="signoff-title">Compliance sign-off</h2>
+                <p className="panel-subtitle">Review the outstanding findings before approval.</p>
+              </div>
+              <div className="score-display">
+                <span className="score-value">{complianceScore}%</span>
+                <span className="score-label">compliance score</span>
+              </div>
             </div>
-
-            <p className="text-base text-slate-700 mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <progress
+              className={`score-progress ${complianceScore >= 70 ? "score-good" : complianceScore >= 40 ? "score-watch" : "score-low"}`}
+              value={complianceScore}
+              max="100"
+              aria-label={`Compliance score ${complianceScore} percent`}
+            />
+            <p className="compliance-message">
               {complianceScore >= 70
-                ? "✅ Content meets brand compliance standards and is ready for approval."
+                ? "Content meets brand compliance standards and is ready for approval."
                 : complianceScore >= 40
-                ? "⚠️ Content needs some improvements to meet brand standards."
-                : "❌ Content requires significant revision before approval."}
+                ? "Content needs some improvements to meet brand standards."
+                : "Content requires significant revision before approval."}
             </p>
 
-            {/* Approver actions */}
             {isApproverMode && reviewStatus === "pending_approval" && (
-              <div className="flex gap-4">
+              <div className="approval-actions">
                 <button
                   onClick={handleApprove}
                   disabled={saving}
-                  className="flex-1 bg-green-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
+                  className="button button-primary"
                 >
-                  ✓ Approve
+                  {saving ? "Processing..." : "Approve review"}
                 </button>
                 <button
                   onClick={handleRequestChanges}
                   disabled={saving}
-                  className="flex-1 bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all"
+                  className="button button-secondary"
                 >
-                  ← Request Changes
+                  Request changes
                 </button>
               </div>
             )}
-          </div>
+          </section>
         )}
-      </div>
+      </main>
     </div>
   );
 }
