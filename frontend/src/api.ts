@@ -1,7 +1,9 @@
 import type { AnalyzeResponse, Review, Finding } from "./types";
 
 // Base URL for API requests
-import.meta.env.VITE_API_URL || "https://brandguard-api.brandguard-api.workers.dev";
+const BASE_URL =
+  (import.meta.env.VITE_API_URL || "https://brandguard-api.brandguard-api.workers.dev").replace(/\/+$/, "");
+
 
 // Generic request helper that handles fetch, errors, and JSON parsing
 async function request<T>(
