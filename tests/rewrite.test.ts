@@ -195,4 +195,20 @@ describe("Rewrite application", () => {
       "Before $& value .\nAfter."
     );
   });
+
+  it("applies a phrase rewrite only at its evidence span", () => {
+    const content = "The guaranteed results are in the report. The guarantee terms in the appendix remain unchanged.";
+    const finding = createFinding({
+      evidence: "guaranteed results",
+      explanation: "Verify the claim before publishing.",
+      replacement: "results",
+    });
+
+    const result = applyReplacement(content, finding);
+    assert.equal(result.success, true);
+    assert.equal(
+      result.newContent,
+      "The results are in the report. The guarantee terms in the appendix remain unchanged."
+    );
+  });
 });

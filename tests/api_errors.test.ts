@@ -38,18 +38,19 @@ describe("Groq analysis and rules fallback", () => {
       assert.equal(requestBody.temperature, 0.2);
       assert.deepEqual(requestBody.response_format, { type: "json_object" });
       assert.equal(typeof requestBody.model, "string");
+      assert.equal(requestBody.messages[1].content, "Our suitable product is the best choice.");
       return groqCompletion([
         {
           severity: "medium",
           evidence: "best choice",
           explanation: "This comparative claim needs support.",
-          suggestion: "a suitable choice",
+          replacement: "a suitable choice",
         },
       ]);
     });
 
     try {
-      const response = await analyze("Our product is the best choice.");
+      const response = await analyze("Our suitable product is the best choice.");
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("X-Analysis-Source"), "groq");
       assert.equal(
@@ -60,8 +61,7 @@ describe("Groq analysis and rules fallback", () => {
       assert.equal(body.findings.length, 1);
       assert.equal(body.findings[0].id, "llm-1");
       assert.equal(body.findings[0].evidence, "best choice");
-      assert.equal(body.findings[0].replacement, null);
-      assert.equal(body.findings[0].suggestion, "a suitable choice");
+      assert.equal(body.findings[0].replacement, "a suitable choice");
       assert.deepEqual(Object.keys(body).sort(), ["findings"]);
     } finally {
       fetchMock.mock.restore();
@@ -75,7 +75,7 @@ describe("Groq analysis and rules fallback", () => {
           severity: "high",
           evidence: "invented phrase",
           explanation: "Unsupported.",
-          suggestion: "A rewrite.",
+          replacement: "A rewrite.",
         },
       ])
     );
@@ -87,7 +87,7 @@ describe("Groq analysis and rules fallback", () => {
       const body = await response.json() as { findings: Array<{ evidence: string }> };
       assert.ok(body.findings.length > 0);
       assert.ok(body.findings.every((finding) => "This is guaranteed to work.".includes(finding.evidence)));
-      assert.ok(body.findings.some((finding) => finding.evidence === "guaranteed"));
+      assert.ok(body.findings.some((finding) => finding.evidence === "guaranteed to work"));
     } finally {
       fetchMock.mock.restore();
     }
@@ -145,6 +145,87 @@ describe("Groq analysis and rules fallback", () => {
     }
   });
 
+  it("keeps an unsupported guarantee advisory instead of inserting a negative rewrite", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      groqCompletion([
+        {
+          severity: "high",
+          evidence: "guaranteed to work",
+          explanation: "The guaranteed outcome needs supporting evidence.",
+          replacement: "designed to deliver reliable performance",
+        },
+      ])
+    );
+
+    try {
+      const response = await analyze("This product is guaranteed to work.");
+      const body = await response.json() as {
+        findings: Array<{
+          evidence: string;
+          category: string;
+          explanation: string;
+          replacement: string | null;
+        }>;
+      };
+      const finding = body.findings.find(
+        ({ evidence }) => evidence === "guaranteed to work"
+      );
+      assert.ok(finding);
+      assert.equal(finding.category, "needs_verification");
+      assert.equal(finding.replacement, null);
+      assert.match(finding.explanation, /supporting evidence/i);
+      assert.notEqual(finding.replacement, "not guaranteed");
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("quotes the complete guaranteed-results claim and requires verification", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      new Response("unavailable", { status: 503 })
+    );
+
+    try {
+      const response = await analyze("Guaranteed results in 7 days.");
+      const body = await response.json() as {
+        findings: Array<{ evidence: string; replacement: string | null }>;
+      };
+      assert.ok(body.findings.some(
+        ({ evidence, replacement }) =>
+          evidence === "Guaranteed results in 7 days" && replacement === null
+      ));
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("returns an advisory when Groq cannot safely rewrite an evidence-dependent claim", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      groqCompletion([
+        {
+          severity: "high",
+          evidence: "guarantees results in 7 days",
+          explanation: "Verify the guarantee and seven-day outcome with reliable evidence.",
+          replacement: null,
+        },
+      ])
+    );
+
+    try {
+      const response = await analyze("Our service guarantees results in 7 days.");
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        findings: Array<{ evidence: string; replacement: string | null }>;
+      };
+      assert.ok(body.findings.some(
+        ({ evidence, replacement }) =>
+          evidence === "guarantees results in 7 days" && replacement === null
+      ));
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
   it("rejects oversized payloads before calling Groq", async () => {
     const fetchMock = mock.method(globalThis, "fetch", async () => {
       throw new Error("Groq must not be called for oversized payloads.");
@@ -187,21 +268,21 @@ describe("Groq analysis and rules fallback", () => {
       groqCompletion([
         {
           severity: "high",
-          evidence: "BEST",
+          evidence: "best",
           explanation: "Exaggerated comparison.",
-          suggestion: "a better option",
+          replacement: "a choice",
         },
         {
           severity: "invalid",
           evidence: "BEST",
           explanation: "Invalid severity.",
-          suggestion: "a suitable option",
+          replacement: "a suitable option",
         },
         {
           severity: "low",
           evidence: "not present",
           explanation: "Stale.",
-          suggestion: "a rewrite",
+          replacement: "a rewrite",
         },
       ])
     );
@@ -211,7 +292,7 @@ describe("Groq analysis and rules fallback", () => {
       });
       assert.equal(findings.length, 1);
       assert.equal(findings[0].id, "llm-1");
-      assert.equal(findings[0].evidence, "BEST");
+      assert.equal(findings[0].evidence, "best");
     } finally {
       fetchMock.mock.restore();
     }

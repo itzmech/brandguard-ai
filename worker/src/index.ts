@@ -98,7 +98,25 @@ function mergeFindings(
   rules: Awaited<ReturnType<typeof analyzeWithRules>>,
   groq: Awaited<ReturnType<typeof analyzeWithGroq>>
 ) {
-  const candidates = [...rules, ...groq].sort(
+  const contextualGroqFindings = groq.map((finding) => {
+    const overlappingRules = rules.filter((rule) =>
+      overlapsExisting(content, rule, [finding])
+    );
+    const highestSeverity = [...overlappingRules, finding].reduce(
+      (highest, candidate) =>
+        SEVERITY_ORDER[candidate.severity] < SEVERITY_ORDER[highest]
+          ? candidate.severity
+          : highest,
+      finding.severity
+    );
+    return { ...finding, severity: highestSeverity };
+  });
+  const unmatchedRules = rules.filter(
+    (rule) => !contextualGroqFindings.some((finding) =>
+      overlapsExisting(content, rule, [finding])
+    )
+  );
+  const candidates = [...contextualGroqFindings, ...unmatchedRules].sort(
     (left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]
   );
   const accepted: typeof candidates = [];

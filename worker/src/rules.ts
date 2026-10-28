@@ -11,26 +11,25 @@ interface Rule {
 
 const RULES: Rule[] = [
   {
-    pattern: /\b100%\s+guaranteed\b/gi,
+    pattern: /\b100%\s+guaranteed(?:\s+(?:results?(?:\s+\w+){0,4}|to(?:\s+\w+){1,4}))?/gi,
     severity: "high",
-    category: "risk",
-    explanation: "Absolute guarantees require reliable substantiation.",
-    suggestion: () => "not guaranteed",
-    replacement: () => "not guaranteed",
+    category: "needs_verification",
+    explanation: "This absolute guarantee needs supporting evidence before it can be rewritten safely.",
+    suggestion: () => "Verify the guarantee and any stated outcome before publishing.",
   },
   {
-    pattern: /\bguaranteed\b/gi,
+    pattern: /\bguaranteed\b(?:\s+(?:results?(?:\s+\w+){0,4}|to(?:\s+\w+){1,4}))?/gi,
     severity: "high",
-    category: "risk",
-    explanation: "Guarantees can imply certainty that needs substantiation.",
-    suggestion: () => "not guaranteed",
+    category: "needs_verification",
+    explanation: "This guarantee needs supporting evidence before it can be rewritten safely.",
+    suggestion: () => "Verify the guarantee and any stated outcome before publishing.",
   },
   {
     pattern: /\b100%(?!\w)/gi,
     severity: "high",
-    category: "unsupported_claim",
-    explanation: "Absolute percentages need evidence supporting the precise figure.",
-    suggestion: () => "a substantiated percentage",
+    category: "needs_verification",
+    explanation: "This absolute percentage needs evidence supporting the precise figure.",
+    suggestion: () => "Verify the percentage against reliable supporting evidence.",
   },
   {
     pattern: /\bmiracle\s+[\p{L}][\p{L}\p{N}'-]*/giu,
