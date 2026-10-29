@@ -239,8 +239,8 @@ export default function App() {
   // Apply a finding's suggested rewrite, replacing only the flagged
   // substring with the exact replacement text. This deliberately does not insert
   // explanation or advice text.
-  const handleApply = (finding: Finding) => {
-    const result = applyReplacement(content, finding);
+  const handleApply = (finding: Finding, selectedReplacement?: string) => {
+    const result = applyReplacement(content, finding, selectedReplacement);
     if (!result.success) {
       setError(result.reason || 'No rewrite is available for this finding. Edit manually.');
       showToast(result.reason || 'No rewrite available for this finding', 'error');
@@ -252,7 +252,9 @@ export default function App() {
         current,
         finding.id,
         result.evidenceStart,
-        result.evidenceEnd
+        result.evidenceEnd,
+        result.newContent,
+        selectedReplacement
       )
     );
     setContent(result.newContent);
@@ -784,7 +786,7 @@ export default function App() {
                                 key={finding.id}
                                 finding={finding}
                                 decision={decisions[finding.id] || 'pending'}
-                                onApply={() => handleApply(finding)}
+                                onApply={(replacement) => handleApply(finding, replacement)}
                                 onReject={() => handleReject(finding.id)}
                                 disabled={isLocked}
                                 content={content}

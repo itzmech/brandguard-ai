@@ -12,7 +12,7 @@ type ReviewDetailsViewProps = {
   onSubmit: () => void;
   onApprove: () => void;
   onRequestChanges: () => void;
-  onApply: (finding: Finding) => void;
+  onApply: (finding: Finding, replacement?: string) => void;
   onReject: (findingId: string) => void;
   onEditWorkspace: () => void;
   isApproverMode: boolean;
@@ -285,7 +285,7 @@ export function ReviewDetailsView({
                     key={finding.id}
                     finding={finding}
                     decision={decisions[finding.id] || 'pending'}
-                    onApply={() => onApply(finding)}
+                    onApply={(replacement) => onApply(finding, replacement)}
                     onReject={() => onReject(finding.id)}
                     disabled={review.status === 'approved'}
                     content={content}

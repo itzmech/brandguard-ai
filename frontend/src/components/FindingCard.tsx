@@ -5,7 +5,7 @@ import { canApply, getApplyDisabledReason } from '../utils.ts';
 type FindingCardProps = {
   finding: Finding;
   decision: 'pending' | 'applied' | 'rejected';
-  onApply: () => void;
+  onApply: (replacement?: string) => void;
   onReject: () => void;
   disabled?: boolean;
   content?: string;
@@ -95,7 +95,7 @@ export function FindingCard({
           {getCategoryBadge(finding.category)}
         </div>
         <button
-          onClick={onApply}
+          onClick={() => onApply()}
           disabled={disabled || decision === 'applied' || !canBeApplied}
           className="border border-slate-200 bg-white hover:bg-slate-50 text-primary-blue px-2.5 py-0.5 rounded text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           title={decision === 'applied' ? 'Already applied' : !canBeApplied ? disabledReason : 'Apply suggested rewrite'}
@@ -147,11 +147,65 @@ export function FindingCard({
         </div>
       )}
 
+      {finding.suggestions && finding.suggestions.length > 0 && (
+        <div className="mb-3 space-y-2" aria-label="Rewrite suggestions">
+          <h5 className="text-xs font-semibold text-slate-700">Rewrite suggestions</h5>
+          {finding.suggestions.slice(0, 3).map((suggestion, index) => {
+            const suggestionCanApply =
+              !suggestion.requiresVerification &&
+              canApply(finding, content, suggestion.text);
+            const suggestionDisabledReason = suggestion.requiresVerification
+              ? 'Verify this wording before applying it.'
+              : getApplyDisabledReason(finding, content, suggestion.text);
+
+            return (
+              <div
+                key={`${finding.id}-suggestion-${index}`}
+                className="flex flex-col gap-2 border-t border-slate-100 pt-2 sm:flex-row sm:items-start sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs leading-relaxed text-slate-800 break-words">
+                    {suggestion.text}
+                  </p>
+                  {suggestion.requiresVerification && (
+                    <p className="mt-1 text-[11px] font-medium text-amber-800">
+                      Requires evidence or verification before use.
+                    </p>
+                  )}
+                  {!suggestionCanApply && !suggestion.requiresVerification && (
+                    <p className="mt-1 text-[11px] text-amber-800">
+                      {suggestionDisabledReason}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onApply(suggestion.text)}
+                  disabled={
+                    disabled ||
+                    decision === 'applied' ||
+                    !suggestionCanApply
+                  }
+                  className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-primary-blue transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-blue disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    suggestionCanApply
+                      ? 'Replace only the selected evidence with this suggestion'
+                      : suggestionDisabledReason
+                  }
+                >
+                  Apply Suggestion
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Actions */}
       {decision === 'pending' && (
         <div className="flex items-center gap-2 pt-1 border-t border-border-default/50">
           <button
-            onClick={onApply}
+            onClick={() => onApply()}
             disabled={disabled || !canBeApplied}
             className="flex-1 bg-primary-blue hover:bg-blue-hover text-white py-1.5 px-3 rounded-lg text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             title={!canBeApplied ? disabledReason : 'Apply suggested rewrite to editor'}
@@ -187,7 +241,7 @@ export function FindingCard({
             <span>Suggestion dismissed</span>
           </div>
           <button
-            onClick={onApply}
+            onClick={() => onApply()}
             disabled={disabled || !canBeApplied}
             className="text-primary-blue hover:underline text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             title={!canBeApplied ? disabledReason : 'Undo dismissal and apply replacement'}

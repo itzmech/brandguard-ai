@@ -98,6 +98,58 @@ export function findAlignedEvidence(
   return evidence;
 }
 
+export function findEvidenceRange(
+  content: string,
+  finding: Pick<Finding, 'evidence' | 'context' | 'targetStart'>
+): { start: number; end: number } | null {
+  const { evidence, context, targetStart } = finding;
+  if (!content || !evidence.trim()) return null;
+
+  if (
+    typeof targetStart === 'number' &&
+    targetStart >= 0 &&
+    content.slice(targetStart, targetStart + evidence.length) === evidence
+  ) {
+    if (!context) {
+      return { start: targetStart, end: targetStart + evidence.length };
+    }
+    const contextIndex = content.indexOf(context);
+    if (
+      contextIndex >= 0 &&
+      content.indexOf(context, contextIndex + 1) === -1 &&
+      targetStart >= contextIndex &&
+      targetStart + evidence.length <= contextIndex + context.length
+    ) {
+      return { start: targetStart, end: targetStart + evidence.length };
+    }
+  }
+
+  if (context) {
+    const contextIndex = content.indexOf(context);
+    if (contextIndex >= 0 && content.indexOf(context, contextIndex + 1) === -1) {
+      const evidenceIndex = context.indexOf(evidence);
+      if (
+        evidenceIndex >= 0 &&
+        context.indexOf(evidence, evidenceIndex + 1) === -1
+      ) {
+        const start = contextIndex + evidenceIndex;
+        return { start, end: start + evidence.length };
+      }
+    }
+  }
+
+  const firstIndex = content.indexOf(evidence);
+  if (firstIndex < 0 || content.indexOf(evidence, firstIndex + 1) >= 0) {
+    return null;
+  }
+  return { start: firstIndex, end: firstIndex + evidence.length };
+}
+
+function isSelectedSuggestionSafe(finding: Finding, replacement: string): boolean {
+  const selected = finding.suggestions?.find(({ text }) => text === replacement);
+  return Boolean(selected && !selected.requiresVerification);
+}
+
 /**
  * Decide whether a finding can be safely applied.
  * A finding is applicable ONLY when:
@@ -105,12 +157,23 @@ export function findAlignedEvidence(
  * 2. The replacement is actual replacement text, NOT generic advice or guidance.
  * 3. If `content` is provided, the flagged evidence can be located in the content.
  */
-export function canApply(finding: Finding, content?: string): boolean {
+export function canApply(
+  finding: Finding,
+  content?: string,
+  selectedReplacement?: string
+): boolean {
   if (!finding) return false;
 
-  const rawReplacement = finding.replacement;
+  const rawReplacement = selectedReplacement ?? finding.replacement;
 
   if (typeof rawReplacement !== 'string' || !rawReplacement.trim()) {
+    return false;
+  }
+
+  if (
+    selectedReplacement !== undefined &&
+    !isSelectedSuggestionSafe(finding, selectedReplacement)
+  ) {
     return false;
   }
 
@@ -125,7 +188,7 @@ export function canApply(finding: Finding, content?: string): boolean {
     if (!finding.evidence || !finding.evidence.trim()) {
       return false;
     }
-    if (!findAlignedEvidence(content, finding.evidence)) {
+    if (!findEvidenceRange(content, finding)) {
       return false;
     }
   }
@@ -136,26 +199,37 @@ export function canApply(finding: Finding, content?: string): boolean {
 /**
  * Get the specific explanation for why Apply is unavailable for a finding.
  */
-export function getApplyDisabledReason(finding: Finding, content?: string): string {
+export function getApplyDisabledReason(
+  finding: Finding,
+  content?: string,
+  selectedReplacement?: string
+): string {
   if (!finding) return 'Invalid finding.';
 
   if (typeof content === 'string') {
     if (!finding.evidence || !finding.evidence.trim()) {
       return 'No exact evidence span was identified; review and edit this finding manually.';
     }
-    const firstIndex = content.indexOf(finding.evidence);
-    if (firstIndex === -1) {
+    if (!findEvidenceRange(content, finding)) {
+      const firstIndex = content.indexOf(finding.evidence);
+      if (firstIndex === -1) {
       return 'Flagged text not found in current editor content (text was edited or finding is stale).';
-    }
-    if (content.indexOf(finding.evidence, firstIndex + 1) !== -1) {
+      }
       return 'Evidence appears more than once in current content, so the target is ambiguous.';
     }
   }
 
-  const rawReplacement = finding.replacement;
+  const rawReplacement = selectedReplacement ?? finding.replacement;
 
   if (typeof rawReplacement !== 'string' || !rawReplacement.trim()) {
     return 'Advisory finding: no direct text replacement (external verification or manual editing required).';
+  }
+
+  if (
+    selectedReplacement !== undefined &&
+    !isSelectedSuggestionSafe(finding, selectedReplacement)
+  ) {
+    return 'This suggestion requires verification before it can be applied.';
   }
 
   if (isAdviceText(rawReplacement)) {
@@ -175,7 +249,8 @@ export function getApplyDisabledReason(finding: Finding, content?: string): stri
  */
 export function applyReplacement(
   content: string,
-  finding: Finding
+  finding: Finding,
+  selectedReplacement?: string
 ):
   | {
       success: true;
@@ -184,18 +259,22 @@ export function applyReplacement(
       evidenceEnd: number;
     }
   | { success: false; newContent: string; reason: string } {
-  if (!canApply(finding, content)) {
+  if (!canApply(finding, content, selectedReplacement)) {
     return {
       success: false,
       newContent: content,
-      reason: getApplyDisabledReason(finding, content) || 'Cannot apply replacement.',
+      reason:
+        getApplyDisabledReason(finding, content, selectedReplacement) ||
+        'Cannot apply replacement.',
     };
   }
 
-  const rawReplacement = typeof finding.replacement === 'string' ? finding.replacement : '';
+  const rawReplacement =
+    selectedReplacement ??
+    (typeof finding.replacement === 'string' ? finding.replacement : '');
 
-  const aligned = findAlignedEvidence(content, finding.evidence);
-  if (!aligned) {
+  const range = findEvidenceRange(content, finding);
+  if (!range) {
     return {
       success: false,
       newContent: content,
@@ -203,23 +282,35 @@ export function applyReplacement(
     };
   }
 
-  const idx = content.indexOf(aligned);
-  if (idx === -1) {
-    return {
-      success: false,
-      newContent: content,
-      reason: 'Could not locate evidence index in content.',
-    };
-  }
-
   // Exact slicing guarantees safe replacement without RegExp or $ metacharacter substitution side effects
-  const newContent = content.slice(0, idx) + rawReplacement + content.slice(idx + aligned.length);
+  const newContent =
+    content.slice(0, range.start) + rawReplacement + content.slice(range.end);
   return {
     success: true,
     newContent,
-    evidenceStart: idx,
-    evidenceEnd: idx + aligned.length,
+    evidenceStart: range.start,
+    evidenceEnd: range.end,
   };
+}
+
+function getSentenceContext(content: string, start: number, end: number): string {
+  let contextStart = start;
+  while (contextStart > 0 && !/[\n\r.!?]/.test(content[contextStart - 1])) {
+    contextStart -= 1;
+  }
+  while (contextStart < start && /\s/.test(content[contextStart])) {
+    contextStart += 1;
+  }
+
+  let contextEnd = end;
+  while (contextEnd < content.length && !/[\n\r.!?]/.test(content[contextEnd])) {
+    contextEnd += 1;
+  }
+  if (contextEnd < content.length && /[.!?]/.test(content[contextEnd])) {
+    contextEnd += 1;
+  }
+
+  return content.slice(contextStart, contextEnd);
 }
 
 export function invalidateOverlappingFindings(
@@ -227,35 +318,51 @@ export function invalidateOverlappingFindings(
   findings: Finding[],
   appliedFindingId: string,
   appliedEvidenceStart: number,
-  appliedEvidenceEnd: number
+  appliedEvidenceEnd: number,
+  updatedContent?: string,
+  appliedReplacement?: string
 ): Finding[] {
   return findings.map((finding) => {
-    if (
-      finding.id === appliedFindingId ||
-      typeof finding.replacement !== 'string' ||
-      !finding.replacement.trim()
-    ) {
-      return finding;
+    if (finding.id === appliedFindingId) {
+      return appliedReplacement === undefined
+        ? finding
+        : { ...finding, replacement: appliedReplacement };
     }
 
     if (!finding.evidence || !finding.evidence.trim()) return finding;
 
-    let evidenceStart = content.indexOf(finding.evidence);
-    let overlapsAppliedText = false;
-    while (evidenceStart !== -1) {
-      const evidenceEnd = evidenceStart + finding.evidence.length;
-      if (evidenceStart < appliedEvidenceEnd && appliedEvidenceStart < evidenceEnd) {
-        overlapsAppliedText = true;
-        break;
-      }
-      evidenceStart = content.indexOf(finding.evidence, evidenceStart + 1);
+    const range = findEvidenceRange(content, finding);
+    if (!range) return finding;
+    const overlapsAppliedText =
+      range.start < appliedEvidenceEnd && appliedEvidenceStart < range.end;
+    if (overlapsAppliedText) {
+      return {
+        ...finding,
+        replacement: null,
+        suggestions: [],
+        explanation: `${finding.explanation} This evidence overlaps text replaced by another finding, so manual review is required.`,
+      };
     }
-    if (!overlapsAppliedText) return finding;
+
+    if (!updatedContent) return finding;
+    const delta = updatedContent.length - content.length;
+    const updatedStart =
+      range.start >= appliedEvidenceEnd ? range.start + delta : range.start;
+    if (
+      updatedContent.slice(updatedStart, updatedStart + finding.evidence.length) !==
+      finding.evidence
+    ) {
+      return finding;
+    }
 
     return {
       ...finding,
-      replacement: null,
-      explanation: `${finding.explanation} This evidence overlaps text replaced by another finding, so manual review is required.`,
+      targetStart: updatedStart,
+      context: getSentenceContext(
+        updatedContent,
+        updatedStart,
+        updatedStart + finding.evidence.length
+      ),
     };
   });
 }

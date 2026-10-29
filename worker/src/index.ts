@@ -1,4 +1,4 @@
-import type { Env, AnalyzeRequest } from "./types.ts";
+import type { Env } from "./types.ts";
 import { analyzeWithGroq } from "./groq.ts";
 import { analyzeWithRules } from "./rules.ts";
 import {
@@ -13,6 +13,10 @@ import {
 const MAX_PAYLOAD_BYTES = 50 * 1024; // 50 KB
 const MAX_CONTENT_LENGTH = 10000; // 10,000 characters
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function getAllowedOrigins(env: Env): string[] {
   const defaults = [
@@ -75,14 +79,39 @@ function findEvidencePositions(content: string, evidence: string): number[] {
   return positions;
 }
 
+function findFindingPositions(
+  content: string,
+  finding: { evidence: string; context?: string; targetStart?: number }
+): number[] {
+  if (
+    typeof finding.targetStart === "number" &&
+    finding.targetStart >= 0 &&
+    content.slice(finding.targetStart, finding.targetStart + finding.evidence.length) === finding.evidence
+  ) {
+    return [finding.targetStart];
+  }
+
+  if (finding.context) {
+    const contextPositions = findEvidencePositions(content, finding.context);
+    if (contextPositions.length === 1) {
+      const evidencePositions = findEvidencePositions(finding.context, finding.evidence);
+      if (evidencePositions.length === 1) {
+        return [contextPositions[0] + evidencePositions[0]];
+      }
+    }
+  }
+
+  return findEvidencePositions(content, finding.evidence);
+}
+
 function overlapsExisting(
   content: string,
-  finding: { evidence: string },
-  accepted: Array<{ evidence: string }>
+  finding: { evidence: string; context?: string; targetStart?: number },
+  accepted: Array<{ evidence: string; context?: string; targetStart?: number }>
 ): boolean {
-  const positions = findEvidencePositions(content, finding.evidence);
+  const positions = findFindingPositions(content, finding);
   return accepted.some((existing) => {
-    const existingPositions = findEvidencePositions(content, existing.evidence);
+    const existingPositions = findFindingPositions(content, existing);
     return positions.some((position) =>
       existingPositions.some(
         (existingPosition) =>
@@ -172,14 +201,14 @@ export default {
 
       // 2. POST /api/analyze
       if (path === "/api/analyze" && request.method === "POST") {
-        let body: AnalyzeRequest;
+        let body: unknown;
         try {
           body = await request.json();
         } catch {
           return jsonResponse({ error: "Invalid JSON in request body." }, 400, corsHeaders);
         }
 
-        if (typeof body.content !== "string") {
+        if (!isRecord(body) || typeof body.content !== "string") {
           return jsonResponse(
             { error: "Field 'content' is required and must be a string." },
             400,
@@ -206,12 +235,13 @@ export default {
           );
         }
 
-        const ruleFindings = analyzeWithRules(body.content);
+        const content = body.content;
+        const ruleFindings = analyzeWithRules(content);
         let groqFindings: Awaited<ReturnType<typeof analyzeWithGroq>> = [];
         let analysisSource = "rules-fallback";
 
         try {
-          groqFindings = await analyzeWithGroq(body.content, env);
+          groqFindings = await analyzeWithGroq(content, env);
           if (groqFindings.length > 0 || ruleFindings.length === 0) {
             analysisSource = "groq";
           }
@@ -220,7 +250,7 @@ export default {
         }
 
         return jsonResponse(
-          { findings: mergeFindings(body.content, ruleFindings, groqFindings) },
+          { findings: mergeFindings(content, ruleFindings, groqFindings) },
           200,
           { ...corsHeaders, "X-Analysis-Source": analysisSource }
         );

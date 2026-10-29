@@ -85,10 +85,16 @@ describe("Workflow & Decision Persistence Across Refresh", () => {
         {
           id: "f-fields",
           severity: "medium",
-          category: "unsupported_claim",
+          category: "needs_verification",
           evidence: "The BEST choice",
+          context: "The BEST choice.",
+          targetStart: 0,
           explanation: "A ranking needs substantiation.",
-          replacement: "An alternative",
+          replacement: null,
+          suggestions: [
+            { text: "The leading choice", requiresVerification: true },
+            { text: "A choice", requiresVerification: false },
+          ],
         },
       ],
       updated_at: new Date().toISOString(),
@@ -102,7 +108,12 @@ describe("Workflow & Decision Persistence Across Refresh", () => {
     assert.deepEqual(reloaded.findings[0], review.findings[0]);
     assert.equal(reloaded.findings[0].evidence, "The BEST choice");
     assert.equal(reloaded.findings[0].explanation, "A ranking needs substantiation.");
-    assert.equal(reloaded.findings[0].replacement, "An alternative");
+    assert.equal(reloaded.findings[0].replacement, null);
+    assert.deepEqual(reloaded.findings[0].suggestions, [
+      { text: "The leading choice", requiresVerification: true },
+      { text: "A choice", requiresVerification: false },
+    ]);
+    assert.equal(reloaded.status, "draft");
   });
 
   it("persists review status changes (submit -> approve / changes-requested) across reload", () => {

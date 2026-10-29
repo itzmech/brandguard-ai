@@ -1,4 +1,10 @@
-import type { Env, Finding, FindingSeverity } from "./types.ts";
+import type {
+  Env,
+  Finding,
+  FindingCategory,
+  FindingSeverity,
+  RewriteSuggestion,
+} from "./types.ts";
 
 const GROQ_MODEL = "openai/gpt-oss-20b";
 const GROQ_TIMEOUT_MS = 10_000;
@@ -13,6 +19,34 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function isSeverity(value: unknown): value is FindingSeverity {
   return value === "high" || value === "medium" || value === "low";
+}
+
+function isCategory(value: unknown): value is FindingCategory {
+  return value === "risk" || value === "unsupported_claim" || value === "needs_verification";
+}
+
+function findExactOccurrences(text: string, value: string): number[] {
+  const positions: number[] = [];
+  let position = text.indexOf(value);
+  while (position !== -1) {
+    positions.push(position);
+    position = text.indexOf(value, position + 1);
+  }
+  return positions;
+}
+
+function findTarget(content: string, evidence: string, context: unknown): number | null {
+  if (typeof context === "string" && context.length > 0) {
+    const contextPositions = findExactOccurrences(content, context);
+    if (contextPositions.length !== 1) return null;
+    const evidencePositions = findExactOccurrences(context, evidence);
+    return evidencePositions.length === 1
+      ? contextPositions[0] + evidencePositions[0]
+      : null;
+  }
+
+  const positions = findExactOccurrences(content, evidence);
+  return positions.length === 1 ? positions[0] : null;
 }
 
 const GRAMMAR_WORDS = new Set([
@@ -35,7 +69,57 @@ function introducesUnsupportedTerms(replacement: string, content: string): boole
 }
 
 function requiresVerification(evidence: string): boolean {
-  return /\b(?:guaranteed|100%|cure)\b/i.test(evidence);
+  return /(?:\bguarantee(?:d|s)?\b|\b100\s*%|\bcures?\b|\bmiracle\b|\bproven\b|\bcertified\b)/i.test(evidence);
+}
+
+function isAdvice(text: string, explanation: string): boolean {
+  return (
+    /^(?:please\s+)?(?:avoid|verify|use|consider|provide|remove|check|cite|substantiate|rewrite|replace|ensure)\b/i.test(text) ||
+    text.trim().toLowerCase() === explanation.trim().toLowerCase()
+  );
+}
+
+function parseSuggestions(
+  item: JsonRecord,
+  supportingContext: string,
+  evidence: string,
+  explanation: string
+): RewriteSuggestion[] {
+  const candidates: unknown[] = Array.isArray(item.suggestions)
+    ? item.suggestions.slice(0, 3)
+    : [];
+  if (typeof item.replacement === "string" && item.replacement.trim()) {
+    candidates.unshift({
+      text: item.replacement,
+      requiresVerification: requiresVerification(evidence),
+    });
+  }
+
+  const suggestions: RewriteSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) continue;
+    const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+    if (
+      !text ||
+      text.length > 500 ||
+      typeof candidate.requiresVerification !== "boolean" ||
+      isAdvice(text, explanation) ||
+      seen.has(text)
+    ) {
+      continue;
+    }
+
+    const verificationRequired =
+      candidate.requiresVerification ||
+      requiresVerification(evidence) ||
+      introducesUnsupportedTerms(text, supportingContext);
+    suggestions.push({ text, requiresVerification: verificationRequired });
+    seen.add(text);
+    if (suggestions.length === 3) break;
+  }
+
+  return suggestions;
 }
 
 async function requestGroq(apiKey: string, content: string): Promise<string> {
@@ -57,7 +141,7 @@ async function requestGroq(apiKey: string, content: string): Promise<string> {
             {
               role: "system",
               content:
-                'Analyze the complete submitted marketing copy for compliance risks. Return only JSON shaped as {"findings":[...]}, with at most 5 findings. Each finding must contain severity ("high", "medium", or "low"), evidence, explanation, and replacement. Evidence must be an exact, case-sensitive substring from the submitted copy and should identify the smallest complete claim span that can be replaced. Use the full sentence and surrounding copy to understand context. A non-null replacement must be a fluent drop-in rewrite for only the evidence span, preserve the original intent and tone where possible, and add no benefits, evidence, statistics, timelines, certifications, or promises not supported by the submitted copy. Do not turn an unsupported positive claim into a negative or awkward phrase merely to remove it. If supporting evidence is needed or no safe context-aware rewrite can be made, set replacement to null and explain what must be verified. Return {"findings":[]} if there are no issues. Do not add markdown.',
+                'Analyze the complete submitted marketing copy semantically, including informal wording, typos, grammar, claims, headlines, bullets, and calls to action. Return only JSON shaped as {"findings":[...]}, with at most 5 findings. Each finding must contain severity ("high", "medium", or "low"), category ("risk", "unsupported_claim", or "needs_verification"), evidence, context, explanation, and suggestions (an array of up to 3 objects with text and boolean requiresVerification). Evidence and context must be exact, case-sensitive substrings copied from the submitted content; context must identify one occurrence of evidence. Use the complete content to understand tone and meaning. Every suggestion must be a fluent drop-in replacement for evidence only and preserve the original intent and tone where supportable. Never invent benefits, evidence, statistics, timelines, certifications, capabilities, or promises. Do not turn unsupported positive claims into negative wording. For unsupported guarantees or claims that require substantiation, return no directly applicable replacement; you may provide candidate wording only when clearly marked requiresVerification=true. Mark other suggestions requiresVerification=true when they add a factual claim not explicitly supported by the submitted copy. If no safe rewrite is possible, return an empty suggestions array and explain what evidence is needed. Return {"findings":[]} if there are no issues. Do not add markdown.',
             },
             { role: "user", content },
           ],
@@ -92,6 +176,13 @@ async function requestGroq(apiKey: string, content: string): Promise<string> {
 }
 
 export async function analyzeWithGroq(content: string, env: Env): Promise<Finding[]> {
+  if (!content.trim()) {
+    throw new Error("Analysis content must not be empty.");
+  }
+  if (content.length > 10_000) {
+    throw new Error("Analysis content exceeds the 10,000 character limit.");
+  }
+
   const apiKey = env.GROQ_API_KEY;
   if (!apiKey?.trim()) {
     throw new Error("GROQ_API_KEY is not configured.");
@@ -128,44 +219,46 @@ export async function analyzeWithGroq(content: string, env: Env): Promise<Findin
   const findings: Finding[] = [];
   for (const item of parsed.findings.slice(0, 5)) {
     if (!isRecord(item)) continue;
-    const { severity, evidence, explanation, replacement } = item;
-    const evidenceCount = typeof evidence === "string"
-      ? content.split(evidence).length - 1
-      : 0;
+    const { severity, category, evidence, context, explanation } = item;
+    const targetStart =
+      typeof evidence === "string"
+        ? findTarget(content, evidence, context)
+        : null;
     if (
       !isSeverity(severity) ||
+      !isCategory(category) ||
       typeof evidence !== "string" ||
       !evidence.trim() ||
-      evidenceCount !== 1 ||
+      targetStart === null ||
       typeof explanation !== "string" ||
-      !explanation.trim() ||
-      !Object.hasOwn(item, "replacement") ||
-      (replacement !== null && typeof replacement !== "string")
+      !explanation.trim()
     ) {
       continue;
     }
 
-    const proposedReplacement =
-      typeof replacement === "string" && replacement.trim()
-        ? replacement.trim()
-        : null;
-    const unsupportedRewrite =
-      proposedReplacement !== null &&
-      (requiresVerification(evidence) ||
-        introducesUnsupportedTerms(proposedReplacement, content));
+    const suggestions = parseSuggestions(
+      item,
+      typeof context === "string" ? context : evidence,
+      evidence,
+      explanation
+    );
+    const replacement =
+      suggestions.find((suggestion) => !suggestion.requiresVerification)?.text ?? null;
+    const needsVerification =
+      category === "needs_verification" ||
+      requiresVerification(evidence) ||
+      suggestions.some((suggestion) => suggestion.requiresVerification);
 
     findings.push({
       id: `llm-${findings.length + 1}`,
       severity,
-      category:
-        replacement === null || unsupportedRewrite
-          ? "needs_verification"
-          : "unsupported_claim",
+      category: needsVerification ? "needs_verification" : category,
       evidence,
-      explanation: unsupportedRewrite
-        ? `${explanation.trim()} The suggested wording is not supported by the submitted copy; verify the claim before using a direct rewrite.`
-        : explanation.trim(),
-      replacement: unsupportedRewrite ? null : proposedReplacement,
+      context: typeof context === "string" ? context : undefined,
+      targetStart,
+      explanation: explanation.trim(),
+      replacement,
+      suggestions,
     });
   }
 

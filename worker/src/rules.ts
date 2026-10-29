@@ -1,5 +1,25 @@
 import type { Finding, FindingCategory, FindingSeverity } from "./types.ts";
 
+function findContext(content: string, start: number, end: number): string {
+  let contextStart = start;
+  while (contextStart > 0 && !/[\n\r.!?]/.test(content[contextStart - 1])) {
+    contextStart -= 1;
+  }
+  while (contextStart < start && /\s/.test(content[contextStart])) {
+    contextStart += 1;
+  }
+
+  let contextEnd = end;
+  while (contextEnd < content.length && !/[\n\r.!?]/.test(content[contextEnd])) {
+    contextEnd += 1;
+  }
+  if (contextEnd < content.length && /[.!?]/.test(content[contextEnd])) {
+    contextEnd += 1;
+  }
+
+  return content.slice(contextStart, contextEnd);
+}
+
 interface Rule {
   pattern: RegExp;
   severity: FindingSeverity;
@@ -86,13 +106,20 @@ export function analyzeWithRules(content: string): Finding[] {
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(content)) !== null) {
       const evidence = match[0];
+      const targetStart = match.index;
+      const replacement = rule.replacement?.(match) ?? null;
       findings.push({
         id: `rule-${findings.length + 1}`,
         severity: rule.severity,
         category: rule.category,
         evidence,
+        context: findContext(content, targetStart, targetStart + evidence.length),
+        targetStart,
         explanation: rule.explanation,
-        replacement: rule.replacement?.(match) ?? null,
+        replacement,
+        suggestions: replacement
+          ? [{ text: replacement, requiresVerification: false }]
+          : [],
         suggestion: rule.suggestion(evidence),
       });
     }
