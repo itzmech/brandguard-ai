@@ -1,10 +1,23 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "brandguard-api",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-02-01",
-  "compatibility_flags": ["nodejs_compat"],
-  "vars": {
-    "ALLOWED_ORIGINS": "https://brandguard-ai-seven.vercel.app,http://localhost:5173,http://localhost:4173,http://127.0.0.1:5174"
-  }
+  // ...
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "redact_query_string": false,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issue_detection": {
+      "enabled": true
+    }
+  },
+  // ...
 }
