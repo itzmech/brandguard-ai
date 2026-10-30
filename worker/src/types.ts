@@ -46,6 +46,7 @@ export interface Review {
 
 export interface Env {
   GROQ_API_KEY?: string;
+  GROQ_DEBUG_ERRORS?: string;
   ALLOWED_ORIGINS?: string;
   REVIEWS_KV?: {
     get: (key: string) => Promise<string | null>;

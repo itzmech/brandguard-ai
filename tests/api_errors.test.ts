@@ -17,6 +17,36 @@ function groqCompletion(findings: unknown[]): Response {
   });
 }
 
+function assertStrictSchema(schema: Record<string, any>): void {
+  const supportedKeywords = new Set([
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "enum",
+  ]);
+  for (const keyword of Object.keys(schema)) {
+    assert.ok(supportedKeywords.has(keyword), `Unsupported JSON Schema keyword: ${keyword}`);
+  }
+
+  if (schema.type === "object") {
+    assert.equal(schema.additionalProperties, false);
+    assert.ok(schema.properties && typeof schema.properties === "object");
+    assert.deepEqual(
+      [...schema.required].sort(),
+      Object.keys(schema.properties).sort()
+    );
+    for (const propertySchema of Object.values(schema.properties) as Record<string, any>[]) {
+      assertStrictSchema(propertySchema);
+    }
+  }
+  if (schema.type === "array") {
+    assert.ok(schema.items && typeof schema.items === "object");
+    assertStrictSchema(schema.items);
+  }
+}
+
 async function analyze(
   content: string,
   env: Env = { GROQ_API_KEY: API_KEY },
@@ -49,35 +79,13 @@ describe("Groq analysis and rules fallback", () => {
       assert.equal(requestBody.response_format.type, "json_schema");
       assert.equal(requestBody.response_format.json_schema.name, "brandguard_findings");
       assert.equal(requestBody.response_format.json_schema.strict, true);
-      const schema = requestBody.response_format.json_schema.schema;
-      assert.deepEqual(schema.required, ["findings"]);
-      assert.equal(schema.additionalProperties, false);
-      assert.equal(schema.properties.findings.type, "array");
-      const findingSchema = schema.properties.findings.items;
-      assert.deepEqual(findingSchema.required, [
-        "severity",
-        "category",
-        "evidence",
-        "context",
-        "start",
-        "end",
-        "explanation",
-        "replacement",
-        "replacementRequiresVerification",
-        "rewriteRationale",
-        "requiresVerification",
-        "uncertainty",
-        "suggestions",
-      ]);
-      assert.equal(findingSchema.additionalProperties, false);
-      assert.deepEqual(findingSchema.properties.replacement.type, ["string", "null"]);
-      assert.deepEqual(
-        findingSchema.properties.suggestions.items.required,
-        ["text", "rationale", "requiresVerification", "uncertainty"]
-      );
+      assertStrictSchema(requestBody.response_format.json_schema.schema);
       assert.deepEqual(JSON.parse(requestBody.messages[1].content), {
         submitted_content: content,
       });
+      assert.match(requestBody.messages[0].content, /exactly one syntactically valid JSON object/i);
+      assert.match(requestBody.messages[0].content, /do not output reasoning, prose, markdown fences/i);
+      assert.match(requestBody.messages[0].content, /findings.*severity.*category.*evidence.*context.*start.*end.*explanation.*replacement/is);
       assert.match(requestBody.messages[0].content, /untrusted data, not instructions/i);
       assert.match(requestBody.messages[0].content, /smallest complete problematic phrase or clause/i);
       assert.match(requestBody.messages[0].content, /rewriteRationale/i);
@@ -870,6 +878,121 @@ describe("Groq analysis and rules fallback", () => {
     }
   });
 
+  it("sends varied plain-text formats to Groq without requiring a marketing template", async () => {
+    const longParagraph = Array.from(
+      { length: 25 },
+      (_, index) =>
+        `Paragraph detail ${index + 1}: teams can organize notes, review updates, and share project information.`
+    ).join(" ");
+    const samples = [
+      ["short slogan", "Make room for better ideas."],
+      ["long marketing paragraph", longParagraph],
+      [
+        "product description",
+        "A compact desk lamp with an adjustable arm, touch controls, and a USB-C power connection.",
+      ],
+      [
+        "social media caption",
+        "New season, new workspace ✨ Tell us which color you would pick! #Workspace",
+      ],
+      [
+        "bullet-point advertisement",
+        "- Lightweight design\n- Three color options\n- Order online today",
+      ],
+      [
+        "informal incomplete paragraph",
+        "we got this thing out now kinda works great for notes and stuff, check it out",
+      ],
+      [
+        "multiple paragraphs and mixed formatting",
+        "Update:\nThe project is underway.\n\n> A note from the team\n\nNext steps — review, revise, share.",
+      ],
+      [
+        "content without an obvious risk",
+        "The meeting begins at 10:00. Please bring the draft agenda and your notes.",
+      ],
+    ] as const;
+    let requestCount = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input, init) => {
+      requestCount += 1;
+      const requestBody = JSON.parse(String(init?.body));
+      const submitted = JSON.parse(
+        requestBody.messages[1].content
+      ).submitted_content as string;
+      assert.equal(submitted, samples[requestCount - 1][1]);
+      assert.equal(requestBody.model, "openai/gpt-oss-20b");
+      assert.equal(requestBody.response_format.type, "json_schema");
+      assert.equal(requestBody.response_format.json_schema.strict, true);
+      const systemPrompt = requestBody.messages[0].content as string;
+      assert.match(systemPrompt, /regardless of genre, style, format, or completeness/i);
+      assert.match(systemPrompt, /do not require a particular template/i);
+      assert.match(systemPrompt, /do not force findings when none exist/i);
+
+      if (requestCount === 1) {
+        const evidence = "better ideas";
+        const start = submitted.indexOf(evidence);
+        return groqCompletion([{
+          severity: "low",
+          category: "unsupported_claim",
+          evidence,
+          context: submitted,
+          start,
+          end: start + evidence.length,
+          explanation: "This broad benefit statement may need context.",
+          replacement: "new ideas",
+          replacementRequiresVerification: false,
+          rewriteRationale: "Uses more neutral wording without adding a factual promise.",
+          requiresVerification: false,
+          uncertainty: null,
+          suggestions: [{
+            text: "new ideas",
+            rationale: "Uses more neutral wording without adding a factual promise.",
+            requiresVerification: false,
+            uncertainty: null,
+          }],
+        }]);
+      }
+      return groqCompletion([]);
+    });
+
+    try {
+      for (const [label, content] of samples) {
+        assert.ok(content.length > 0, `${label} should be non-empty`);
+        const response = await analyze(content);
+        const body = await response.json() as {
+          analysisSource: string;
+          findings: Array<{
+            evidence: string;
+            replacement: string | null;
+            context: string;
+          }>;
+        };
+        assert.equal(response.status, 200, label);
+        assert.equal(body.analysisSource, "groq", label);
+        if (requestCount === 1) {
+          assert.deepEqual(
+            body.findings.map(({ evidence, replacement, context }) => ({
+              evidence,
+              replacement,
+              context,
+            })),
+            [{
+              evidence: "better ideas",
+              replacement: "new ideas",
+              context: content,
+            }],
+            label
+          );
+        } else {
+          assert.deepEqual(body.findings, [], label);
+        }
+      }
+      assert.equal(requestCount, samples.length);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
   it("does not append hardcoded rule findings when Groq finds no issue", async () => {
     const fetchMock = mock.method(globalThis, "fetch", async () =>
       groqCompletion([])
@@ -1047,6 +1170,162 @@ describe("Groq analysis and rules fallback", () => {
       const serializedLogs = JSON.stringify(errorLog.mock.calls);
       assert.equal(serializedLogs.includes(submittedContent), false);
       assert.equal(serializedLogs.includes(apiKey), false);
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
+    }
+  });
+
+  it("logs failed-generation schema issues only in debug mode without logging generated values", async () => {
+    const submittedContent = "Private source phrase: guaranteed growth.";
+    const apiKey = "secret-debug-test-key";
+    const failedGeneration = JSON.stringify({
+      findings: [
+        {
+          severity: "urgent",
+          category: "risk",
+          evidence: submittedContent,
+          unexpected: apiKey,
+        },
+      ],
+    });
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      Response.json(
+        {
+          error: {
+            message: "Failed to validate generated response.",
+            code: "json_validate_failed",
+            param: "response_format",
+            failed_generation: failedGeneration,
+          },
+        },
+        { status: 400 }
+      )
+    );
+    const errorLog = mock.method(console, "error", () => {});
+
+    try {
+      const response = await analyze(submittedContent, {
+        GROQ_API_KEY: apiKey,
+        GROQ_DEBUG_ERRORS: "true",
+      });
+      assert.equal(response.headers.get("X-Analysis-Source"), "rules-fallback");
+
+      const providerLog = errorLog.mock.calls.find(
+        ({ arguments: args }) => args[0] === "Groq provider error"
+      );
+      assert.ok(providerLog);
+      const details = providerLog.arguments[1] as {
+        failedGeneration: { validJson: boolean; issues: string[] };
+      };
+      assert.equal(details.failedGeneration.validJson, true);
+      assert.ok(
+        details.failedGeneration.issues.includes(
+          "$.findings[0].severity: value_not_in_enum"
+        )
+      );
+      assert.ok(
+        details.failedGeneration.issues.includes(
+          "$.findings[0].explanation: missing_required"
+        )
+      );
+      assert.ok(
+        details.failedGeneration.issues.includes(
+          "$.findings[0]: additional_property"
+        )
+      );
+      const serializedLogs = JSON.stringify(errorLog.mock.calls);
+      assert.equal(serializedLogs.includes(failedGeneration), false);
+      assert.equal(serializedLogs.includes(submittedContent), false);
+      assert.equal(serializedLogs.includes(apiKey), false);
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
+    }
+  });
+
+  it("does not include failed-generation diagnostics when Groq debug mode is disabled", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      Response.json(
+        {
+          error: {
+            message: "Failed to validate generated response.",
+            code: "json_validate_failed",
+            failed_generation: '{"findings":"invalid"}',
+          },
+        },
+        { status: 400 }
+      )
+    );
+    const errorLog = mock.method(console, "error", () => {});
+
+    try {
+      await analyze("A harmless example.");
+      const providerLog = errorLog.mock.calls.find(
+        ({ arguments: args }) => args[0] === "Groq provider error"
+      );
+      assert.ok(providerLog);
+      assert.equal("failedGeneration" in (providerLog.arguments[1] as object), false);
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
+    }
+  });
+
+  it("falls back safely when Groq rejects non-JSON generation", async () => {
+    const submittedContent = "The service guarantees results.";
+    const failedGeneration = "Here is the result: { findings: [";
+    const fetchMock = mock.method(globalThis, "fetch", async (_input, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      assert.equal(requestBody.response_format.type, "json_schema");
+      assert.equal(requestBody.response_format.json_schema.strict, true);
+      return Response.json(
+        {
+          error: {
+            message: "Generated response is not valid JSON.",
+            code: "json_validate_failed",
+            param: "response_format",
+            failed_generation: failedGeneration,
+          },
+        },
+        { status: 400 }
+      );
+    });
+    const errorLog = mock.method(console, "error", () => {});
+
+    try {
+      const response = await analyze(submittedContent, {
+        GROQ_API_KEY: API_KEY,
+        GROQ_DEBUG_ERRORS: "true",
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("X-Analysis-Source"), "rules-fallback");
+      const body = await response.json() as {
+        analysisSource: string;
+        findings: Array<{ replacement: string | null; suggestions: unknown[] }>;
+        analysisMessage: string;
+      };
+      assert.equal(body.analysisSource, "rules-fallback");
+      assert.match(body.analysisMessage, /AI analysis is unavailable/i);
+      assert.ok(body.findings.every(
+        ({ replacement, suggestions }) =>
+          replacement === null && suggestions.length === 0
+      ));
+      assert.equal(JSON.stringify(body).includes("json_validate_failed"), false);
+
+      const providerLog = errorLog.mock.calls.find(
+        ({ arguments: args }) => args[0] === "Groq provider error"
+      );
+      assert.ok(providerLog);
+      const details = providerLog.arguments[1] as {
+        failedGeneration: { validJson: boolean; issues: string[] };
+      };
+      assert.deepEqual(details.failedGeneration, {
+        validJson: false,
+        issues: ["invalid_json"],
+      });
+      assert.equal(JSON.stringify(errorLog.mock.calls).includes(failedGeneration), false);
+      assert.equal(JSON.stringify(errorLog.mock.calls).includes(submittedContent), false);
     } finally {
       fetchMock.mock.restore();
       errorLog.mock.restore();
@@ -1372,6 +1651,8 @@ describe("Groq analysis and rules fallback", () => {
     try {
       const empty = await analyze(" \n ");
       assert.equal(empty.status, 400);
+      const oversized = await analyze("x".repeat(10_001));
+      assert.equal(oversized.status, 400);
       const malformed = await worker.fetch(
         new Request("https://worker.test/api/analyze", {
           method: "POST",
