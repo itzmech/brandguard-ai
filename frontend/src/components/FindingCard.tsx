@@ -82,6 +82,13 @@ export function FindingCard({
               Verification needed: {finding.uncertainty}
             </p>
           )}
+          {!finding.uncertainty &&
+            (finding.requiresVerification ||
+              finding.category === 'needs_verification') && (
+              <p className="mt-2 text-xs leading-relaxed text-amber-800">
+                The original wording needs verification. Each alternative has its own verification status.
+              </p>
+            )}
           {finding.rewriteRationale && (finding.suggestions?.length ?? 0) === 0 && (
             <p className="mt-2 text-xs leading-relaxed text-slate-600">
               Rewrite rationale: {finding.rewriteRationale}
@@ -138,6 +145,12 @@ export function FindingCard({
                 {showDirectReplacement && directReplacement && (
                   <li className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 flex-1 space-y-3">
+                      {(finding.requiresVerification ||
+                        finding.category === 'needs_verification') && (
+                        <p className="text-xs font-medium text-amber-800">
+                          Verification warning: review this wording before publishing. You can apply it for further editing.
+                        </p>
+                      )}
                       <div>
                         <p className="text-xs font-semibold text-slate-500">Original matched text</p>
                         <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
@@ -174,13 +187,10 @@ export function FindingCard({
                 {suggestions.map((suggestion, index) => {
                   const canApplySuggestion =
                     !alreadyApplied &&
-                    !suggestion.requiresVerification &&
                     canApply(finding, content, suggestion.text);
                   const reason = alreadyApplied
                     ? 'This finding has already been applied. Reanalyse the content before applying it again.'
-                    : suggestion.requiresVerification
-                      ? 'Verify this wording before applying it.'
-                      : getApplyDisabledReason(finding, content, suggestion.text);
+                    : getApplyDisabledReason(finding, content, suggestion.text);
 
                   return (
                     <li
@@ -204,7 +214,7 @@ export function FindingCard({
                         </div>
                         {suggestion.requiresVerification && (
                           <p className="mt-1 text-xs font-medium text-amber-800">
-                            Requires evidence or verification before use.
+                            Verification warning: review this wording before publishing. You can still apply it for further editing.
                           </p>
                         )}
                         {suggestion.rationale && (

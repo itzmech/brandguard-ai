@@ -148,31 +148,55 @@ describe('rewrite data safety', () => {
     }
   });
 
-  it('does not apply suggestions when the source claim requires verification', () => {
-    const source = 'Our product is guaranteed to work.';
+  it('allows applying a safe alternative despite the finding-level verification flag', () => {
+    const source = 'Opening stays. My AI will work for sure. Closing stays.';
+    const evidence = 'My AI will work for sure.';
+    const start = source.indexOf(evidence);
     const candidate = finding({
       category: 'needs_verification',
-      evidence: source,
-      context: source,
-      targetStart: 0,
-      targetEnd: source.length,
+      evidence,
+      context: evidence,
+      targetStart: start,
+      targetEnd: start + evidence.length,
       requiresVerification: true,
-      replacement: 'Our product is designed to work.',
-      suggestions: [{
-        text: 'Our product is designed to work.',
-        requiresVerification: false,
-      }],
+      replacement: 'Explore what my AI can do.',
+      suggestions: [
+        {
+          text: 'Explore what my AI can do.',
+          requiresVerification: false,
+        },
+        {
+          text: 'My AI delivers guaranteed results.',
+          requiresVerification: true,
+        },
+      ],
     });
 
-    assert.equal(canApply(candidate, source), false);
-    assert.equal(
-      applyAndAcceptReplacement(source, candidate, 'pending').newContent,
-      source
+    assert.equal(canApply(candidate, source, 'Explore what my AI can do.'), true);
+    assert.equal(canApply(candidate, source, 'My AI delivers guaranteed results.'), true);
+    const result = applyAndAcceptReplacement(
+      source,
+      candidate,
+      'pending',
+      'Explore what my AI can do.'
     );
-    assert.equal(
-      applyAndAcceptReplacement(source, candidate, 'pending', candidate.replacement ?? undefined).success,
-      false
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.decision, 'accepted');
+      assert.equal(
+        result.newContent,
+        'Opening stays. Explore what my AI can do. Closing stays.'
+      );
+    }
+
+    const stale = applyAndAcceptReplacement(
+      source.replace(evidence, 'The source has changed.'),
+      candidate,
+      'pending',
+      'Explore what my AI can do.'
     );
+    assert.equal(stale.success, false);
+    assert.equal('decision' in stale, false);
   });
 
   it('does not reapply already accepted or applied findings', () => {
@@ -257,7 +281,7 @@ describe('rewrite data safety', () => {
       ],
     });
 
-    assert.equal(canApply(selected, content, 'unverified alternative'), false);
+    assert.equal(canApply(selected, content, 'unverified alternative'), true);
     const result = applyReplacement(content, selected, 'first revision');
     assert.equal(result.success, true);
     assert.equal(result.newContent, 'First first revision. Then flagged phrase.');
@@ -403,12 +427,35 @@ describe('rewrite data safety', () => {
       },
     });
     const api = await import('./api.ts');
-    const revisedContent = 'A headline: a useful option for teams.';
+    const source = 'A headline: the BEST option for teams.';
+    const evidence = 'the BEST';
+    const applied = applyAndAcceptReplacement(
+      source,
+      finding({
+        evidence,
+        context: source,
+        targetStart: source.indexOf(evidence),
+        targetEnd: source.indexOf(evidence) + evidence.length,
+        replacement: null,
+        suggestions: [{
+          text: 'a suitable',
+          requiresVerification: false,
+        }],
+      }),
+      'pending',
+      'a suitable'
+    );
+    assert.equal(applied.success, true);
+    if (!applied.success) return;
+    const revisedContent = applied.newContent;
+    assert.equal(revisedContent, 'A headline: a suitable option for teams.');
     const fakeId = 'fake-revised-content-test';
 
     api.setFakeMode(true);
     try {
-      await api.saveReview(fakeId, revisedContent, []);
+      await api.saveReview(fakeId, revisedContent, [{
+        ...finding({ evidence, replacement: 'a suitable' }),
+      }]);
       const restored = await api.loadReview(fakeId);
       assert.equal(restored.content, revisedContent);
 

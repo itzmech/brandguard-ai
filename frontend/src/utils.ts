@@ -178,14 +178,8 @@ export function findEvidenceRange(
   return { start: firstIndex, end: firstIndex + evidence.length };
 }
 
-function isSelectedSuggestionSafe(finding: Finding, replacement: string): boolean {
-  const selected = finding.suggestions?.find(({ text }) => text === replacement);
-  return Boolean(
-    selected &&
-    !selected.requiresVerification &&
-    finding.requiresVerification !== true &&
-    finding.category !== 'needs_verification'
-  );
+function hasSelectedSuggestion(finding: Finding, replacement: string): boolean {
+  return Boolean(finding.suggestions?.some(({ text }) => text === replacement));
 }
 
 /**
@@ -209,15 +203,8 @@ export function canApply(
   }
 
   if (
-    finding.requiresVerification === true ||
-    finding.category === 'needs_verification'
-  ) {
-    return false;
-  }
-
-  if (
     selectedReplacement !== undefined &&
-    !isSelectedSuggestionSafe(finding, selectedReplacement)
+    !hasSelectedSuggestion(finding, selectedReplacement)
   ) {
     return false;
   }
@@ -266,22 +253,15 @@ export function getApplyDisabledReason(
 
   const rawReplacement = selectedReplacement ?? finding.replacement;
 
-  if (
-    finding.requiresVerification === true ||
-    finding.category === 'needs_verification'
-  ) {
-    return 'This finding contains a claim that must be verified before any rewrite can be applied.';
-  }
-
   if (typeof rawReplacement !== 'string' || !rawReplacement.trim()) {
     return 'Advisory finding: no direct text replacement (external verification or manual editing required).';
   }
 
   if (
     selectedReplacement !== undefined &&
-    !isSelectedSuggestionSafe(finding, selectedReplacement)
+    !hasSelectedSuggestion(finding, selectedReplacement)
   ) {
-    return 'This suggestion requires verification before it can be applied.';
+    return 'This rewrite is not a suggestion associated with the finding.';
   }
 
   if (isAdviceText(rawReplacement)) {

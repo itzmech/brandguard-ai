@@ -216,6 +216,69 @@ describe("Groq analysis and rules fallback", () => {
     }
   });
 
+  it("evaluates alternatives independently from a finding-level verification flag", async () => {
+    const content = "My AI will work for sure.";
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      groqCompletion([
+        {
+          severity: "high",
+          category: "needs_verification",
+          evidence: content,
+          context: content,
+          start: 0,
+          end: content.length,
+          explanation: "The performance guarantee is unsupported.",
+          requiresVerification: true,
+          suggestions: [
+            {
+              text: "Explore what my AI can do.",
+              rationale: "Recasts the assertion as an invitation without promising performance.",
+              requiresVerification: false,
+            },
+            {
+              text: "My AI delivers guaranteed results.",
+              rationale: "This alternative retains a guaranteed outcome.",
+              requiresVerification: false,
+            },
+            {
+              text: "My AI is designed to assist with your workflow.",
+              rationale: "This describes a product capability that needs confirmation.",
+              requiresVerification: true,
+            },
+          ],
+        },
+      ])
+    );
+
+    try {
+      const response = await analyze(content);
+      const body = await response.json() as {
+        findings: Array<{
+          requiresVerification: boolean;
+          replacement: string | null;
+          suggestions: Array<{ text: string; requiresVerification: boolean }>;
+        }>;
+      };
+      assert.equal(body.findings.length, 1);
+      const finding = body.findings[0];
+      assert.equal(finding.requiresVerification, true);
+      assert.equal(finding.replacement, "Explore what my AI can do.");
+      assert.deepEqual(
+        finding.suggestions.map(({ text, requiresVerification }) => [
+          text,
+          requiresVerification,
+        ]),
+        [
+          ["Explore what my AI can do.", false],
+          ["My AI delivers guaranteed results.", true],
+          ["My AI is designed to assist with your workflow.", true],
+        ]
+      );
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
   it("blocks meaning changes and newly strengthened claims even if the model marks them safe", async () => {
     const content = "Our product is available.";
     const fetchMock = mock.method(globalThis, "fetch", async () =>
@@ -671,6 +734,53 @@ describe("Groq analysis and rules fallback", () => {
       assert.match(body.analysisMessage, /AI analysis is unavailable/i);
     } finally {
       fetchMock.mock.restore();
+    }
+  });
+
+  it("logs safe structured provider diagnostics without exposing them in the API response", async () => {
+    const submittedContent = "Private phrase: crimson otter launch.";
+    const apiKey = "secret-test-token-123";
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      Response.json(
+        {
+          error: {
+            message: `Invalid request for ${submittedContent} using ${apiKey}`,
+            code: "invalid_request_error",
+            param: "messages",
+          },
+        },
+        { status: 400 }
+      )
+    );
+    const errorLog = mock.method(console, "error", () => {});
+
+    try {
+      const response = await analyze(submittedContent, { GROQ_API_KEY: apiKey });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("X-Analysis-Source"), "rules-fallback");
+      const body = await response.json() as {
+        analysisSource: string;
+        analysisMessage: string;
+      };
+      assert.equal(body.analysisSource, "rules-fallback");
+      assert.match(body.analysisMessage, /AI analysis is unavailable/i);
+      assert.equal(JSON.stringify(body).includes("invalid_request_error"), false);
+
+      assert.equal(errorLog.mock.calls.length, 1);
+      const [eventName, details] = errorLog.mock.calls[0].arguments as [
+        string,
+        { status: number; message: string; code: string; param: string },
+      ];
+      assert.equal(eventName, "Groq provider error");
+      assert.equal(details.status, 400);
+      assert.equal(details.code, "invalid_request_error");
+      assert.equal(details.param, "messages");
+      assert.match(details.message, /redacted/i);
+      assert.equal(JSON.stringify(errorLog.mock.calls).includes(submittedContent), false);
+      assert.equal(JSON.stringify(errorLog.mock.calls).includes(apiKey), false);
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
     }
   });
 

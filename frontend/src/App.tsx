@@ -522,7 +522,7 @@ export default function App() {
 
   // Derived Title for Review Header
   const currentReviewTitle = useMemo(() => {
-    if (!reviewId) return 'New Review';
+    if (!reviewId) return 'Untitled review';
     const firstLine = content.split('\n')[0].trim();
     return firstLine ? (firstLine.length > 45 ? firstLine.substring(0, 45) + '...' : firstLine) : 'Review Details';
   }, [reviewId, content]);
@@ -568,13 +568,7 @@ export default function App() {
       {/* Navy Sidebar matching mockup */}
       <Sidebar
         currentView={currentView}
-        onNavigate={(view) => {
-          if (view === 'new-review') {
-            handleStartNewReview();
-          } else {
-            setCurrentView(view as ViewMode);
-          }
-        }}
+        onNavigate={(view) => setCurrentView(view)}
       />
 
       {/* Main Content Area */}
@@ -772,16 +766,6 @@ export default function App() {
                           </button>
                         )}
 
-                        {/* Fresh review reset */}
-                        {reviewId && (
-                          <button
-                            onClick={handleStartNewReview}
-                            className="text-xs text-slate-500 hover:text-slate-900 p-2 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-                            title="Start New Review"
-                          >
-                            + New
-                          </button>
-                        )}
                       </div>
                     }
                   />
@@ -954,18 +938,7 @@ export default function App() {
           {/* ========================================================= */}
           {currentView === 'my-reviews' && (
             <div className="space-y-6">
-              <PageHeader
-                title="My Reviews"
-                action={
-                  <button
-                    onClick={handleStartNewReview}
-                    className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <span>+</span>
-                    <span>New Review</span>
-                  </button>
-                }
-              />
+              <PageHeader title="My Reviews" />
 
               <ReviewTable
                 reviews={allReviews}
@@ -985,14 +958,6 @@ export default function App() {
               <PageHeader
                 title="Pending Approval"
                 subtitle="Reviews awaiting reviewer sign-off before publication."
-                action={
-                  <button
-                    onClick={handleStartNewReview}
-                    className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
-                  >
-                    + New Review
-                  </button>
-                }
               />
               <ReviewTable
                 reviews={allReviews}
@@ -1010,14 +975,6 @@ export default function App() {
               <PageHeader
                 title="Approved Reviews"
                 subtitle="Compliant marketing assets cleared for publishing."
-                action={
-                  <button
-                    onClick={handleStartNewReview}
-                    className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
-                  >
-                    + New Review
-                  </button>
-                }
               />
               <ReviewTable
                 reviews={allReviews}
@@ -1035,14 +992,6 @@ export default function App() {
               <PageHeader
                 title="Changes Requested"
                 subtitle="Content requiring edits or clarification before approval can proceed."
-                action={
-                  <button
-                    onClick={handleStartNewReview}
-                    className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
-                  >
-                    + New Review
-                  </button>
-                }
               />
               <ReviewTable
                 reviews={allReviews}
