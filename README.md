@@ -1,5 +1,10 @@
 # BrandGuard AI
 
+> **Built together, in parallel.** Our team worked on two BrandGuard models simultaneously and brought both to a working state. Explore the two live versions:
+>
+> - **BrandGuard model 1:** [Open the Vercel version](https://brandguard-ai-seven.vercel.app/)
+> - **BrandGuard model 2:** [Open the Render version](https://brandguard-ai-nvfs.onrender.com/)
+
 BrandGuard AI is a content-review workspace for checking marketing copy for potential brand and compliance risks. It combines automated analysis with a review workflow so a team can inspect findings, consider suggested rewrites, and track approval status.
 
 **Live app:** https://brandguard-ai-seven.vercel.app
