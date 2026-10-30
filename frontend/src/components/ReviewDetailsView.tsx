@@ -8,11 +8,13 @@ type ReviewDetailsViewProps = {
   content: string;
   findings: Finding[];
   decisions: Record<string, FindingDecision>;
+  selectedReplacements: Record<string, string>;
   onBack: () => void;
   onSubmit: () => void;
   onApprove: () => void;
   onRequestChanges: () => void;
-  onAcceptAndApply: (finding: Finding, replacement?: string) => void;
+  onAccept: (finding: Finding, replacement?: string) => void;
+  onApplyAccepted: () => void;
   onReject: (findingId: string) => void;
   onEditWorkspace: () => void;
   isApproverMode: boolean;
@@ -46,11 +48,13 @@ export function ReviewDetailsView({
   content,
   findings,
   decisions,
+  selectedReplacements,
   onBack,
   onSubmit,
   onApprove,
   onRequestChanges,
-  onAcceptAndApply,
+  onAccept,
+  onApplyAccepted,
   onReject,
   onEditWorkspace,
   isApproverMode,
@@ -280,20 +284,33 @@ export function ReviewDetailsView({
                 No compliance findings recorded for this review.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {findings.map((finding) => (
-                  <FindingCard
-                    key={finding.id}
-                    finding={finding}
-                    decision={decisions[finding.id] || 'pending'}
-                    onAcceptAndApply={(replacement) =>
-                      onAcceptAndApply(finding, replacement)
-                    }
-                    onReject={() => onReject(finding.id)}
-                    disabled={review.status === 'approved'}
-                    content={content}
-                  />
-                ))}
+              <div className="space-y-4">
+                {Object.values(decisions).some((decision) => decision === 'accepted') && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={onApplyAccepted}
+                      disabled={review.status === 'approved'}
+                      className="min-h-10 rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Apply accepted suggestions ({Object.values(decisions).filter((decision) => decision === 'accepted').length})
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {findings.map((finding) => (
+                    <FindingCard
+                      key={finding.id}
+                      finding={finding}
+                      decision={decisions[finding.id] || 'pending'}
+                      selectedReplacement={selectedReplacements[finding.id]}
+                      onAccept={(replacement) => onAccept(finding, replacement)}
+                      onReject={() => onReject(finding.id)}
+                      disabled={review.status === 'approved'}
+                      content={content}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>

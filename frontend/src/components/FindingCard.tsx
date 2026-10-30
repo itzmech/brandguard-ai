@@ -6,7 +6,8 @@ import { canApply, findEvidenceRange, getApplyDisabledReason } from '../utils';
 type FindingCardProps = {
   finding: Finding;
   decision: FindingDecision;
-  onAcceptAndApply: (replacement?: string) => void;
+  selectedReplacement?: string;
+  onAccept: (replacement?: string) => void;
   onReject: () => void;
   disabled?: boolean;
   content?: string;
@@ -28,7 +29,8 @@ const decisionLabels: Record<FindingDecision, string> = {
 export function FindingCard({
   finding,
   decision,
-  onAcceptAndApply,
+  selectedReplacement,
+  onAccept,
   onReject,
   disabled = false,
   content = '',
@@ -44,14 +46,14 @@ export function FindingCard({
     directReplacement !== null &&
     !suggestions.some(({ text }) => text === directReplacement);
   const directReplacementCanApply = directReplacement
-    ? canApply(finding, content) && decision !== 'accepted' && decision !== 'applied'
+    ? canApply(finding, content) && decision !== 'applied'
     : false;
   const directReplacementReason = directReplacement
-    ? decision === 'accepted' || decision === 'applied'
+    ? decision === 'applied'
       ? 'This finding has already been applied. Reanalyse the content before applying it again.'
       : getApplyDisabledReason(finding, content)
     : '';
-  const alreadyApplied = decision === 'accepted' || decision === 'applied';
+  const alreadyApplied = decision === 'applied';
   const cardTint =
     finding.severity === 'high'
       ? 'border-rose-200 bg-rose-50/30'
@@ -137,7 +139,7 @@ export function FindingCard({
             <div className="mb-3">
               <h3 className="text-sm font-semibold text-slate-900">Suggested Rewrites</h3>
               <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                Each option rewrites only the matched passage.
+                Accept options independently, then apply accepted suggestions together.
               </p>
             </div>
             {suggestions.length > 0 || showDirectReplacement ? (
@@ -148,7 +150,7 @@ export function FindingCard({
                       {(finding.requiresVerification ||
                         finding.category === 'needs_verification') && (
                         <p className="text-xs font-medium text-amber-800">
-                          Verification warning: review this wording before publishing. You can apply it for further editing.
+                          Verification warning: review this wording before publishing. It remains editable after applying.
                         </p>
                       )}
                       <div>
@@ -170,16 +172,20 @@ export function FindingCard({
                       )}
                       <button
                         type="button"
-                        onClick={() => onAcceptAndApply()}
+                        onClick={() => onAccept()}
                         disabled={disabled || !directReplacementCanApply}
                         title={
                           directReplacementCanApply
-                            ? 'Apply this replacement and accept the finding'
+                            ? 'Accept this rewrite for batch application'
                             : directReplacementReason
                         }
                         className="min-h-11 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {alreadyApplied ? 'Accepted & Applied' : 'Accept & Apply'}
+                        {decision === 'applied'
+                          ? 'Applied'
+                          : decision === 'accepted' && selectedReplacement === directReplacement
+                            ? 'Accepted'
+                            : 'Accept suggestion'}
                       </button>
                     </div>
                   </li>
@@ -232,12 +238,17 @@ export function FindingCard({
                         )}
                         <button
                           type="button"
-                          onClick={() => onAcceptAndApply(suggestion.text)}
+                          onClick={() => onAccept(suggestion.text)}
                           disabled={disabled || !canApplySuggestion}
-                          title={canApplySuggestion ? 'Apply this rewrite and accept the finding' : reason}
+                          aria-pressed={decision === 'accepted' && selectedReplacement === suggestion.text}
+                          title={canApplySuggestion ? 'Accept this rewrite for batch application' : reason}
                           className="min-h-11 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {alreadyApplied ? 'Accepted & Applied' : 'Accept & Apply'}
+                          {decision === 'applied'
+                            ? 'Applied'
+                            : decision === 'accepted' && selectedReplacement === suggestion.text
+                              ? 'Accepted'
+                              : 'Accept suggestion'}
                         </button>
                       </div>
                     </li>

@@ -201,6 +201,7 @@ export function canApply(
 
   if (
     selectedReplacement !== undefined &&
+    selectedReplacement !== finding.replacement &&
     !hasSelectedSuggestion(finding, selectedReplacement)
   ) {
     return false;
@@ -256,6 +257,7 @@ export function getApplyDisabledReason(
 
   if (
     selectedReplacement !== undefined &&
+    selectedReplacement !== finding.replacement &&
     !hasSelectedSuggestion(finding, selectedReplacement)
   ) {
     return 'This rewrite is not a suggestion associated with the finding.';
@@ -430,4 +432,121 @@ export function invalidateOverlappingFindings(
       ),
     };
   });
+}
+
+export function applyAcceptedReplacements(
+  content: string,
+  findings: Finding[],
+  accepted: Array<{ findingId: string; replacement: string }>
+):
+  | { success: true; newContent: string; findings: Finding[]; appliedIds: string[] }
+  | { success: false; newContent: string; findings: Finding[]; reason: string } {
+  if (accepted.length === 0) {
+    return {
+      success: false,
+      newContent: content,
+      findings,
+      reason: 'Accept at least one valid rewrite before applying accepted suggestions.',
+    };
+  }
+
+  const targets = accepted.map(({ findingId, replacement }) => {
+    const finding = findings.find((candidate) => candidate.id === findingId);
+    if (!finding || !canApply(finding, content, replacement)) return null;
+    const range = findEvidenceRange(content, finding);
+    return range ? { finding, replacement, range } : null;
+  });
+  if (targets.some((target) => target === null)) {
+    return {
+      success: false,
+      newContent: content,
+      findings,
+      reason: 'An accepted rewrite is stale, ambiguous, or no longer valid. Reanalyse before applying.',
+    };
+  }
+
+  const validTargets = targets.filter(
+    (target): target is NonNullable<typeof target> => target !== null
+  );
+  const orderedTargets = [...validTargets].sort(
+    (left, right) => left.range.start - right.range.start
+  );
+  if (
+    orderedTargets.some(
+      (target, index) =>
+        index > 0 && target.range.start < orderedTargets[index - 1].range.end
+    )
+  ) {
+    return {
+      success: false,
+      newContent: content,
+      findings,
+      reason: 'Accepted rewrites overlap. Reanalyse and accept non-overlapping suggestions.',
+    };
+  }
+
+  let newContent = content;
+  for (const target of [...orderedTargets].reverse()) {
+    newContent =
+      newContent.slice(0, target.range.start) +
+      target.replacement +
+      newContent.slice(target.range.end);
+  }
+
+  const updatedFindings = findings.map((finding) => {
+    const ownTarget = validTargets.find(({ finding: targetFinding }) =>
+      targetFinding.id === finding.id
+    );
+    if (ownTarget) return { ...finding, replacement: ownTarget.replacement };
+
+    const range = findEvidenceRange(content, finding);
+    if (!range) return finding;
+    if (
+      validTargets.some(
+        ({ range: targetRange }) =>
+          range.start < targetRange.end && targetRange.start < range.end
+      )
+    ) {
+      return {
+        ...finding,
+        replacement: null,
+        suggestions: [],
+        explanation: `${finding.explanation} This evidence overlaps text replaced by another finding, so manual review is required.`,
+      };
+    }
+
+    const updatedStart =
+      range.start +
+      validTargets.reduce(
+        (delta, { range: targetRange, replacement }) =>
+          targetRange.end <= range.start
+            ? delta + replacement.length - (targetRange.end - targetRange.start)
+            : delta,
+        0
+      );
+    if (
+      newContent.slice(updatedStart, updatedStart + finding.evidence.length) !==
+      finding.evidence
+    ) {
+      return finding;
+    }
+
+    return {
+      ...finding,
+      targetStart: updatedStart,
+      targetEnd: updatedStart + finding.evidence.length,
+      context: getSentenceContext(
+        newContent,
+        updatedStart,
+        updatedStart + finding.evidence.length
+      ),
+    };
+  });
+
+  return {
+    success: true,
+    newContent,
+    findings: updatedFindings,
+    appliedIds: validTargets.map(({ finding: targetFinding }) => targetFinding.id),
+  };
 }

@@ -7,9 +7,9 @@ import type {
 import type { Finding, FindingDecision, Review } from './types';
 import * as api from './api';
 import {
-  applyAndAcceptReplacement,
+  applyAcceptedReplacements,
+  canApply,
   clampReviewSummaryWidth,
-  invalidateOverlappingFindings,
   REVIEW_SUMMARY_MAX_WIDTH,
   REVIEW_SUMMARY_MIN_WIDTH,
   updateFindingDecision,
@@ -58,13 +58,13 @@ export default function App() {
   const [slowServer, setSlowServer] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [decisions, setDecisions] = useState<Record<string, FindingDecision>>({});
+  const [selectedReplacements, setSelectedReplacements] = useState<Record<string, string>>({});
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [reviewStatus, setReviewStatus] = useState<Review['status']>('draft');
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const contentRef = useRef(content);
   const findingsRef = useRef(findings);
   const analysisRequestId = useRef(0);
-  const appliedFindingIds = useRef(new Set<string>());
   const [sampleIndex, setSampleIndex] = useState(0);
   const [findingSort, setFindingSort] = useState<'risk-desc' | 'risk-asc'>('risk-desc');
   const [summaryWidth, setSummaryWidth] = useState(290);
@@ -181,6 +181,33 @@ export default function App() {
     return initial;
   };
 
+  const loadSelectedReplacementsForReview = (
+    id: string,
+    currentFindings: Finding[],
+    currentContent: string
+  ): { stored: boolean; replacements: Record<string, string> } => {
+    try {
+      const saved = localStorage.getItem(`brandguard_replacements_${id}`);
+      if (!saved) return { stored: false, replacements: {} };
+      const parsed: unknown = JSON.parse(saved);
+      if (!isRecord(parsed)) return { stored: true, replacements: {} };
+
+      const replacements: Record<string, string> = {};
+      for (const finding of currentFindings) {
+        const replacement = parsed[finding.id];
+        if (
+          typeof replacement === 'string' &&
+          canApply(finding, currentContent, replacement)
+        ) {
+          replacements[finding.id] = replacement;
+        }
+      }
+      return { stored: true, replacements };
+    } catch {
+      return { stored: true, replacements: {} };
+    }
+  };
+
   // Helper to save decisions persisted across page refreshes
   const saveDecisionsForReview = (
     id: string | null,
@@ -192,6 +219,33 @@ export default function App() {
     } catch {
       // ignore
     }
+  };
+
+  const saveSelectedReplacementsForReview = (
+    id: string | null,
+    replacements: Record<string, string>
+  ) => {
+    try {
+      const key = id ? `brandguard_replacements_${id}` : 'brandguard_replacements_current';
+      localStorage.setItem(key, JSON.stringify(replacements));
+    } catch {
+      // ignore
+    }
+  };
+
+  const restoreReviewDecisions = (id: string, reviewFindings: Finding[], reviewContent: string) => {
+    const restored = loadSelectedReplacementsForReview(id, reviewFindings, reviewContent);
+    const loadedDecisions = loadDecisionsForReview(id, reviewFindings);
+    for (const finding of reviewFindings) {
+      if (loadedDecisions[finding.id] !== 'accepted') continue;
+      if (restored.replacements[finding.id]) continue;
+      // Older versions persisted "accepted" only after applying the rewrite.
+      loadedDecisions[finding.id] = restored.stored ? 'pending' : 'applied';
+    }
+    setSelectedReplacements(restored.replacements);
+    saveSelectedReplacementsForReview(id, restored.replacements);
+    saveDecisionsForReview(id, loadedDecisions);
+    return loadedDecisions;
   };
 
   // Refresh reviews list
@@ -228,11 +282,15 @@ export default function App() {
           if (ignore) return;
           updateContent(review.content);
           updateFindings(review.findings);
-          appliedFindingIds.current.clear();
+          setSelectedReplacements({});
           setReviewId(review.id);
           setReviewStatus(review.status);
           setHasAnalyzed(review.findings.length > 0 || review.status !== 'draft');
-          const loadedDecisions = loadDecisionsForReview(review.id, review.findings);
+          const loadedDecisions = restoreReviewDecisions(
+            review.id,
+            review.findings,
+            review.content
+          );
           setDecisions(loadedDecisions);
           setWorkspaceMode(review.status === 'approved' || review.status === 'pending_approval' ? 'details' : 'editor');
         })
@@ -255,14 +313,18 @@ export default function App() {
       const review = await api.loadReview(id);
       updateContent(review.content);
       updateFindings(review.findings);
-      appliedFindingIds.current.clear();
+      setSelectedReplacements({});
       setReviewId(review.id);
       setReviewStatus(review.status);
       setHasAnalyzed(true);
       setError(null);
       setAnalysisMessage(null);
 
-      const loadedDecisions = loadDecisionsForReview(review.id, review.findings);
+      const loadedDecisions = restoreReviewDecisions(
+        review.id,
+        review.findings,
+        review.content
+      );
       setDecisions(loadedDecisions);
       localStorage.setItem('brandguard_review_id', review.id);
 
@@ -285,9 +347,10 @@ export default function App() {
     setSlowServer(false);
     localStorage.removeItem('brandguard_review_id');
     localStorage.removeItem('brandguard_decisions_current');
+    localStorage.removeItem('brandguard_replacements_current');
     updateContent('');
     updateFindings([]);
-    appliedFindingIds.current.clear();
+    setSelectedReplacements({});
     setError(null);
     setAnalysisMessage(null);
     setHasAnalyzed(false);
@@ -304,6 +367,7 @@ export default function App() {
     if (window.confirm('Are you sure you want to delete this review?')) {
       await api.deleteReview(id);
       localStorage.removeItem(`brandguard_decisions_${id}`);
+      localStorage.removeItem(`brandguard_replacements_${id}`);
       if (reviewId === id) {
         handleStartNewReview();
       }
@@ -334,7 +398,8 @@ export default function App() {
         return;
       }
       updateFindings(result.findings);
-      appliedFindingIds.current.clear();
+      setSelectedReplacements({});
+      saveSelectedReplacementsForReview(reviewId, {});
       setAnalysisMessage(result.analysisMessage ?? null);
       setHasAnalyzed(true);
 
@@ -376,56 +441,78 @@ export default function App() {
     }
   };
 
-  const handleAcceptAndApply = (
+  const handleAcceptSuggestion = (
     finding: Finding,
     selectedReplacement?: string
   ) => {
-    if (appliedFindingIds.current.has(finding.id)) {
-      showToast('This rewrite has already been applied. Reanalyse before applying it again.', 'error');
-      return;
-    }
-
     const currentFinding = findingsRef.current.find(({ id }) => id === finding.id);
-    if (!currentFinding) {
-      showToast('This finding is no longer current. Reanalyse the content before applying it.', 'error');
+    const replacement = selectedReplacement ?? currentFinding?.replacement ?? '';
+    if (
+      !currentFinding ||
+      decisions[finding.id] === 'applied' ||
+      !canApply(currentFinding, contentRef.current, replacement)
+    ) {
+      showToast('This rewrite is stale, ambiguous, or invalid. Reanalyse the content before accepting it.', 'error');
       return;
     }
 
-    const currentContent = contentRef.current;
-    const result = applyAndAcceptReplacement(
-      currentContent,
-      currentFinding,
-      decisions[finding.id] ?? 'pending',
-      selectedReplacement
-    );
-    if (!result.success) {
-      showToast(result.reason || 'This rewrite could not be applied. Reanalyse the content and try again.', 'error');
-      return;
-    }
-    appliedFindingIds.current.add(finding.id);
-    updateFindings(
-      invalidateOverlappingFindings(
-        currentContent,
-        findingsRef.current,
-        finding.id,
-        result.evidenceStart,
-        result.evidenceEnd,
-        result.newContent,
-        selectedReplacement
-      )
-    );
-    updateContent(result.newContent);
-    setSavedAt(null);
+    const updatedReplacements = {
+      ...selectedReplacements,
+      [finding.id]: replacement,
+    };
+    setSelectedReplacements(updatedReplacements);
+    saveSelectedReplacementsForReview(reviewId, updatedReplacements);
     setDecisions((prev) => {
-      const updated = updateFindingDecision(prev, finding.id, result.decision);
+      const updated = updateFindingDecision(prev, finding.id, 'accepted');
       saveDecisionsForReview(reviewId, updated);
       return updated;
     });
-    showToast('Rewrite applied and finding accepted');
+    showToast('Suggestion accepted. Apply accepted suggestions when ready.');
+  };
+
+  const handleApplyAcceptedSuggestions = () => {
+    const accepted = Object.entries(decisions)
+      .filter(([findingId, decision]) =>
+        decision === 'accepted' && typeof selectedReplacements[findingId] === 'string'
+      )
+      .map(([findingId]) => ({
+        findingId,
+        replacement: selectedReplacements[findingId],
+      }));
+    const result = applyAcceptedReplacements(
+      contentRef.current,
+      findingsRef.current,
+      accepted
+    );
+    if (!result.success) {
+      showToast(result.reason, 'error');
+      return;
+    }
+
+    updateContent(result.newContent);
+    updateFindings(result.findings);
+    setSelectedReplacements({});
+    saveSelectedReplacementsForReview(reviewId, {});
+    setSavedAt(null);
+    setDecisions((previous) => {
+      const updated = result.appliedIds.reduce(
+        (next, findingId) => updateFindingDecision(next, findingId, 'applied'),
+        previous
+      );
+      saveDecisionsForReview(reviewId, updated);
+      return updated;
+    });
+    showToast(
+      `Applied ${result.appliedIds.length} accepted ${result.appliedIds.length === 1 ? 'suggestion' : 'suggestions'}`
+    );
   };
 
   // Reject finding suggestion
   const handleReject = (findingId: string) => {
+    const updatedReplacements = { ...selectedReplacements };
+    delete updatedReplacements[findingId];
+    setSelectedReplacements(updatedReplacements);
+    saveSelectedReplacementsForReview(reviewId, updatedReplacements);
     setDecisions((prev) => {
       const updated = updateFindingDecision(prev, findingId, 'rejected');
       saveDecisionsForReview(reviewId, updated);
@@ -448,7 +535,9 @@ export default function App() {
       }
       localStorage.setItem('brandguard_review_id', review.id);
       saveDecisionsForReview(review.id, decisions);
+      saveSelectedReplacementsForReview(review.id, selectedReplacements);
       localStorage.removeItem('brandguard_decisions_current');
+      localStorage.removeItem('brandguard_replacements_current');
       setReviewId(review.id);
       setReviewStatus(review.status);
 
@@ -734,7 +823,9 @@ export default function App() {
                   onSubmit={handleSubmit}
                   onApprove={handleApprove}
                   onRequestChanges={handleRequestChanges}
-                  onAcceptAndApply={handleAcceptAndApply}
+                  selectedReplacements={selectedReplacements}
+                  onAccept={handleAcceptSuggestion}
+                  onApplyAccepted={handleApplyAcceptedSuggestions}
                   onReject={handleReject}
                   onEditWorkspace={() => setWorkspaceMode('editor')}
                   isApproverMode={isApproverMode}
@@ -844,26 +935,38 @@ export default function App() {
                         className="rounded-xl border border-border-default bg-white p-5 shadow-sm"
                         aria-labelledby="findings-heading"
                       >
-                        <div className="flex items-center justify-between pb-3 mb-4 border-b border-border-default">
+                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-border-default">
                           <h2 id="findings-heading" className="text-base font-bold text-slate-900">
                             Findings ({findings.length})
                           </h2>
 
                           {hasAnalyzed && findings.length > 0 && (
-                            <div className="inline-flex items-center gap-1 text-xs text-slate-500">
-                              <span>Sort by:</span>
-                              <select
-                                className="bg-transparent border border-border-default rounded px-1.5 py-0.5 text-xs font-semibold text-slate-700 cursor-pointer"
-                                value={findingSort}
-                                onChange={(event) => setFindingSort(event.target.value === 'risk-asc' ? 'risk-asc' : 'risk-desc')}
-                                aria-label="Sort findings by risk"
-                              >
-                                <option value="risk-desc">Risk (High to Low)</option>
-                                <option value="risk-asc">Risk (Low to High)</option>
-                              </select>
-                              <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                              </svg>
+                            <div className="flex flex-wrap items-center justify-end gap-3">
+                              {Object.values(decisions).filter((decision) => decision === 'accepted').length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleApplyAcceptedSuggestions}
+                                  disabled={isLocked || saving}
+                                  className="min-h-10 rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Apply accepted suggestions ({Object.values(decisions).filter((decision) => decision === 'accepted').length})
+                                </button>
+                              )}
+                              <div className="inline-flex items-center gap-1 text-xs text-slate-500">
+                                <span>Sort by:</span>
+                                <select
+                                  className="bg-transparent border border-border-default rounded px-1.5 py-0.5 text-xs font-semibold text-slate-700 cursor-pointer"
+                                  value={findingSort}
+                                  onChange={(event) => setFindingSort(event.target.value === 'risk-asc' ? 'risk-asc' : 'risk-desc')}
+                                  aria-label="Sort findings by risk"
+                                >
+                                  <option value="risk-desc">Risk (High to Low)</option>
+                                  <option value="risk-asc">Risk (Low to High)</option>
+                                </select>
+                                <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -931,8 +1034,9 @@ export default function App() {
                                 key={finding.id}
                                 finding={finding}
                                 decision={decisions[finding.id] || 'pending'}
-                                onAcceptAndApply={(replacement) =>
-                                  handleAcceptAndApply(finding, replacement)
+                                selectedReplacement={selectedReplacements[finding.id]}
+                                onAccept={(replacement) =>
+                                  handleAcceptSuggestion(finding, replacement)
                                 }
                                 onReject={() => handleReject(finding.id)}
                                 disabled={isLocked || loading || saving}

@@ -1,5 +1,5 @@
 import type { Env } from "./types.ts";
-import { analyzeWithGroq } from "./groq.ts";
+import { analyzeWithGroq, logAnalysisFailure } from "./groq.ts";
 import { analyzeWithRules } from "./rules.ts";
 import {
   listReviews,
@@ -153,7 +153,8 @@ export default {
           findings = await analyzeWithGroq(content, env);
           analysisSource = "groq";
           analysisMessage = null;
-        } catch {
+        } catch (error) {
+          logAnalysisFailure(error);
           analysisSource = "rules-fallback";
         }
 

@@ -2,6 +2,7 @@ import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Finding } from './types.ts';
 import {
+  applyAcceptedReplacements,
   applyAndAcceptReplacement,
   applyReplacement,
   canApply,
@@ -224,6 +225,134 @@ describe('rewrite data safety', () => {
     );
     assert.equal(rejected['finding-1'], 'rejected');
     assert.equal(content, 'The original editor text stays.');
+  });
+
+  it('accepts and rejects findings independently, then applies accepted rewrites together', () => {
+    const source = 'Opening stays. Claim A remains. Claim B remains. Closing stays.';
+    const firstEvidence = 'Claim A';
+    const secondEvidence = 'Claim B';
+    const first = finding({
+      id: 'first',
+      evidence: firstEvidence,
+      context: source,
+      targetStart: source.indexOf(firstEvidence),
+      targetEnd: source.indexOf(firstEvidence) + firstEvidence.length,
+      replacement: null,
+      suggestions: [{ text: 'A revised claim', requiresVerification: false }],
+    });
+    const second = finding({
+      id: 'second',
+      evidence: secondEvidence,
+      context: source,
+      targetStart: source.indexOf(secondEvidence),
+      targetEnd: source.indexOf(secondEvidence) + secondEvidence.length,
+      replacement: null,
+      suggestions: [{ text: 'A second revision', requiresVerification: false }],
+    });
+    const third = finding({
+      id: 'third',
+      evidence: 'Closing',
+      context: source,
+      targetStart: source.indexOf('Closing'),
+      targetEnd: source.indexOf('Closing') + 'Closing'.length,
+      replacement: 'Ending',
+    });
+    const decisions = updateFindingDecision(
+      updateFindingDecision(
+        updateFindingDecision({}, first.id, 'accepted'),
+        second.id,
+        'accepted'
+      ),
+      third.id,
+      'rejected'
+    );
+    assert.deepEqual(decisions, {
+      first: 'accepted',
+      second: 'accepted',
+      third: 'rejected',
+    });
+
+    const result = applyAcceptedReplacements(source, [first, second, third], [
+      { findingId: first.id, replacement: 'A revised claim' },
+      { findingId: second.id, replacement: 'A second revision' },
+    ]);
+    assert.equal(result.success, true);
+    if (!result.success) return;
+    assert.equal(
+      result.newContent,
+      'Opening stays. A revised claim remains. A second revision remains. Closing stays.'
+    );
+    assert.deepEqual(result.appliedIds, ['first', 'second']);
+    assert.equal(result.findings[2].targetStart, result.newContent.indexOf('Closing'));
+    assert.equal(
+      result.newContent.slice(
+        result.findings[2].targetStart!,
+        result.findings[2].targetEnd!
+      ),
+      'Closing'
+    );
+  });
+
+  it('applies accepted findings atomically and refuses stale or overlapping targets', () => {
+    const source = 'First phrase; second phrase.';
+    const first = finding({
+      id: 'first',
+      evidence: 'First phrase',
+      context: source,
+      targetStart: 0,
+      targetEnd: 'First phrase'.length,
+      replacement: 'First revision',
+    });
+    const staleSecond = finding({
+      id: 'second',
+      evidence: 'not present',
+      replacement: 'other',
+    });
+    const stale = applyAcceptedReplacements(source, [first, staleSecond], [
+      { findingId: first.id, replacement: 'First revision' },
+      { findingId: staleSecond.id, replacement: 'other' },
+    ]);
+    assert.equal(stale.success, false);
+    assert.equal(stale.newContent, source);
+
+    const overlapping = finding({
+      id: 'overlapping',
+      evidence: 'phrase',
+      context: source,
+      targetStart: source.indexOf('phrase'),
+      targetEnd: source.indexOf('phrase') + 'phrase'.length,
+      replacement: 'word',
+    });
+    const conflict = applyAcceptedReplacements(source, [first, overlapping], [
+      { findingId: first.id, replacement: 'First revision' },
+      { findingId: overlapping.id, replacement: 'word' },
+    ]);
+    assert.equal(conflict.success, false);
+    assert.equal(conflict.newContent, source);
+    assert.match(conflict.reason, /overlap/i);
+  });
+
+  it('allows a validated direct replacement to be queued without a suggestion list', () => {
+    const source = 'A bad claim needs review.';
+    const direct = finding({
+      id: 'direct',
+      evidence: 'bad claim',
+      context: source,
+      targetStart: source.indexOf('bad claim'),
+      targetEnd: source.indexOf('bad claim') + 'bad claim'.length,
+      replacement: 'careful wording',
+      suggestions: [],
+    });
+
+    const result = applyAcceptedReplacements(source, [direct], [
+      { findingId: direct.id, replacement: direct.replacement! },
+    ]);
+
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.newContent, 'A careful wording needs review.');
+      assert.deepEqual(result.appliedIds, ['direct']);
+    }
   });
 
   it('clamps the adjustable summary width to usable bounds', () => {
@@ -471,30 +600,13 @@ describe('rewrite data safety', () => {
       targetStart: source.indexOf(secondEvidence),
       replacement: 'a different',
     });
-    const firstApplied = applyAndAcceptReplacement(
-      source,
-      firstFinding,
-      'pending',
-    );
-    assert.equal(firstApplied.success, true);
-    if (!firstApplied.success) return;
-    const reanchoredFindings = invalidateOverlappingFindings(
-      source,
-      [firstFinding, secondFinding],
-      firstFinding.id,
-      firstApplied.evidenceStart,
-      firstApplied.evidenceEnd,
-      firstApplied.newContent,
-      'a suitable'
-    );
-    const secondApplied = applyAndAcceptReplacement(
-      firstApplied.newContent,
-      reanchoredFindings[1],
-      'pending'
-    );
-    assert.equal(secondApplied.success, true);
-    if (!secondApplied.success) return;
-    const revisedContent = secondApplied.newContent;
+    const batch = applyAcceptedReplacements(source, [firstFinding, secondFinding], [
+      { findingId: firstFinding.id, replacement: 'a suitable' },
+      { findingId: secondFinding.id, replacement: 'a different' },
+    ]);
+    assert.equal(batch.success, true);
+    if (!batch.success) return;
+    const revisedContent = batch.newContent;
     assert.equal(
       revisedContent,
       'A headline: a suitable option for teams. Another headline: a different choice for teams.'
@@ -514,9 +626,10 @@ describe('rewrite data safety', () => {
       assert.equal(restored.content, revisedContent);
 
       api.setFakeMode(false);
+      const submittedContents: string[] = [];
       const fetchMock = mock.method(globalThis, 'fetch', async (_input, init) => {
         const requestBody = JSON.parse(String(init?.body));
-        assert.equal(requestBody.content, restored.content);
+        submittedContents.push(requestBody.content);
         return Response.json({
           findings: [],
           analysisSource: 'groq',
@@ -524,9 +637,16 @@ describe('rewrite data safety', () => {
         });
       });
       try {
+        const initialResult = await api.analyze(source);
         const result = await api.analyze(restored.content);
+        const secondResult = await api.analyze(restored.content);
+        assert.equal(initialResult.analysisSource, 'groq');
         assert.deepEqual(result.findings, []);
         assert.equal(result.analysisSource, 'groq');
+        assert.deepEqual(secondResult.findings, []);
+        assert.equal(secondResult.analysisSource, 'groq');
+        assert.deepEqual(submittedContents, [source, revisedContent, revisedContent]);
+        assert.equal(fetchMock.mock.calls.length, 3);
       } finally {
         fetchMock.mock.restore();
       }

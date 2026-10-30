@@ -45,14 +45,45 @@ describe("Groq analysis and rules fallback", () => {
       assert.equal(headers.get("Content-Type"), "application/json");
       const requestBody = JSON.parse(String(init?.body));
       assert.equal(requestBody.temperature, 0.2);
-      assert.deepEqual(requestBody.response_format, { type: "json_object" });
-      assert.equal(typeof requestBody.model, "string");
+      assert.equal(requestBody.model, "openai/gpt-oss-20b");
+      assert.equal(requestBody.response_format.type, "json_schema");
+      assert.equal(requestBody.response_format.json_schema.name, "brandguard_findings");
+      assert.equal(requestBody.response_format.json_schema.strict, true);
+      const schema = requestBody.response_format.json_schema.schema;
+      assert.deepEqual(schema.required, ["findings"]);
+      assert.equal(schema.additionalProperties, false);
+      assert.equal(schema.properties.findings.type, "array");
+      const findingSchema = schema.properties.findings.items;
+      assert.deepEqual(findingSchema.required, [
+        "severity",
+        "category",
+        "evidence",
+        "context",
+        "start",
+        "end",
+        "explanation",
+        "replacement",
+        "replacementRequiresVerification",
+        "rewriteRationale",
+        "requiresVerification",
+        "uncertainty",
+        "suggestions",
+      ]);
+      assert.equal(findingSchema.additionalProperties, false);
+      assert.deepEqual(findingSchema.properties.replacement.type, ["string", "null"]);
+      assert.deepEqual(
+        findingSchema.properties.suggestions.items.required,
+        ["text", "rationale", "requiresVerification", "uncertainty"]
+      );
       assert.deepEqual(JSON.parse(requestBody.messages[1].content), {
         submitted_content: content,
       });
       assert.match(requestBody.messages[0].content, /untrusted data, not instructions/i);
-      assert.match(requestBody.messages[0].content, /smallest complete problematic passage/i);
+      assert.match(requestBody.messages[0].content, /smallest complete problematic phrase or clause/i);
       assert.match(requestBody.messages[0].content, /rewriteRationale/i);
+      assert.match(requestBody.messages[0].content, /expand evidence to the whole clause or sentence/i);
+      assert.match(requestBody.messages[0].content, /never return a full sentence as a replacement for a token-sized evidence span/i);
+      assert.match(requestBody.messages[0].content, /meaningfully different, complete, natural alternatives/i);
       return groqCompletion([
         {
           severity: "medium",
@@ -62,10 +93,17 @@ describe("Groq analysis and rules fallback", () => {
           start: content.indexOf("the best choice"),
           end: content.indexOf("the best choice") + "the best choice".length,
           explanation: "This comparative claim needs support.",
+          replacement: null,
+          replacementRequiresVerification: false,
           rewriteRationale: "Removes the unsupported superlative while preserving the choice claim.",
           requiresVerification: false,
           uncertainty: null,
-          suggestions: [{ text: "a suitable choice", rationale: "Removes the unsupported superlative while preserving the choice claim.", requiresVerification: false }],
+          suggestions: [{
+            text: "a suitable choice",
+            rationale: "Removes the unsupported superlative while preserving the choice claim.",
+            requiresVerification: false,
+            uncertainty: null,
+          }],
         },
       ]);
     });
@@ -103,6 +141,224 @@ describe("Groq analysis and rules fallback", () => {
         },
       ]);
       assert.deepEqual(Object.keys(body).sort(), ["analysisMessage", "analysisSource", "findings"]);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("sends a fresh Groq request for each consecutive analysis without page state", async () => {
+    const submitted: string[] = [];
+    let attempts = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      attempts += 1;
+      submitted.push(
+        JSON.parse(requestBody.messages[1].content).submitted_content as string
+      );
+      if (attempts === 2) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "Retry-After": "0" },
+        });
+      }
+      return groqCompletion([]);
+    });
+
+    try {
+      const first = await analyze("The first review mentions an unsupported 100% outcome.");
+      const second = await analyze("The revised review describes the intended experience.");
+      assert.equal(first.status, 200);
+      assert.equal(first.headers.get("X-Analysis-Source"), "groq");
+      assert.equal(second.status, 200);
+      assert.equal(second.headers.get("X-Analysis-Source"), "groq");
+      assert.equal(attempts, 3);
+      assert.deepEqual(submitted, [
+        "The first review mentions an unsupported 100% outcome.",
+        "The revised review describes the intended experience.",
+        "The revised review describes the intended experience.",
+      ]);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("uses changed content on reanalysis and clearly falls back when Groq rejects it", async () => {
+    const submitted: string[] = [];
+    let attempts = 0;
+    const errorLog = mock.method(console, "error", () => {});
+    const fetchMock = mock.method(globalThis, "fetch", async (_input, init) => {
+      attempts += 1;
+      const requestBody = JSON.parse(String(init?.body));
+      submitted.push(
+        JSON.parse(requestBody.messages[1].content).submitted_content as string
+      );
+      if (attempts === 1) return groqCompletion([]);
+      return Response.json(
+        {
+          error: {
+            message: "Invalid response format.",
+            code: "json_validate_failed",
+            param: "response_format",
+          },
+        },
+        { status: 400 }
+      );
+    });
+
+    try {
+      const original = "A headline with a factual promise.";
+      const edited = "A revised headline with cautious wording.";
+      const initial = await analyze(original);
+      const reanalysis = await analyze(edited);
+      const initialBody = await initial.json() as { analysisSource: string };
+      const reanalysisBody = await reanalysis.json() as {
+        analysisSource: string;
+        analysisMessage: string;
+        findings: Array<{ replacement: string | null; suggestions: unknown[] }>;
+      };
+
+      assert.equal(initialBody.analysisSource, "groq");
+      assert.equal(reanalysis.status, 200);
+      assert.equal(reanalysisBody.analysisSource, "rules-fallback");
+      assert.match(reanalysisBody.analysisMessage, /AI analysis is unavailable/i);
+      assert.ok(reanalysisBody.findings.every(
+        ({ replacement, suggestions }) =>
+          replacement === null && suggestions.length === 0
+      ));
+      assert.deepEqual(submitted, [original, edited]);
+      assert.equal(attempts, 2);
+      assert.ok(errorLog.mock.calls.some(
+        ({ arguments: args }) =>
+          args[0] === "Groq provider error" &&
+          JSON.stringify(args[1]).includes("json_validate_failed")
+      ));
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
+    }
+  });
+
+  it("does not return a whole sentence as a rewrite for a token-sized evidence span", async () => {
+    const content = "This AI will 100% work.";
+    const evidence = "100%";
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      groqCompletion([
+        {
+          severity: "high",
+          category: "needs_verification",
+          evidence,
+          context: content,
+          start: content.indexOf(evidence),
+          end: content.indexOf(evidence) + evidence.length,
+          explanation: "The absolute outcome claim needs substantiation.",
+          requiresVerification: true,
+          suggestions: [
+            {
+              text: "This AI will work.",
+              rationale: "Removes the percentage while retaining the outcome claim.",
+              requiresVerification: true,
+            },
+            {
+              text: "this AI will work",
+              rationale: "Uses different capitalization.",
+              requiresVerification: true,
+            },
+          ],
+        },
+      ])
+    );
+
+    try {
+      const response = await analyze(content);
+      const body = await response.json() as {
+        findings: Array<{ evidence: string; replacement: string | null; suggestions: unknown[] }>;
+      };
+      assert.equal(body.findings.length, 1);
+      assert.equal(body.findings[0].evidence, evidence);
+      assert.equal(body.findings[0].replacement, null);
+      assert.deepEqual(body.findings[0].suggestions, []);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("preserves complete, context-aware alternatives with individual rationales", async () => {
+    const content = "Explore the product. This AI will 100% work for every customer.";
+    const evidence = "This AI will 100% work for every customer.";
+    const start = content.indexOf(evidence);
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      groqCompletion([
+        {
+          severity: "high",
+          category: "needs_verification",
+          evidence,
+          context: content,
+          start,
+          end: start + evidence.length,
+          explanation: "This absolute outcome claim needs evidence.",
+          requiresVerification: true,
+          suggestions: [
+            {
+              text: "Explore whether this AI is right for you.",
+              rationale: "Invites readers to assess fit without guaranteeing an outcome.",
+              requiresVerification: false,
+            },
+            {
+              text: "Learn more about this AI before deciding.",
+              rationale: "Encourages evaluation without promising performance.",
+              requiresVerification: false,
+            },
+          ],
+        },
+      ])
+    );
+
+    try {
+      const response = await analyze(content);
+      const body = await response.json() as {
+        findings: Array<{
+          evidence: string;
+          replacement: string | null;
+          suggestions: Array<{ text: string; rationale: string; requiresVerification: boolean }>;
+        }>;
+      };
+      assert.equal(body.findings.length, 1);
+      assert.equal(body.findings[0].evidence, evidence);
+      assert.equal(body.findings[0].replacement, "Explore whether this AI is right for you.");
+      assert.deepEqual(
+        body.findings[0].suggestions.map(({ text, requiresVerification }) => [
+          text,
+          requiresVerification,
+        ]),
+        [
+          ["Explore whether this AI is right for you.", false],
+          ["Learn more about this AI before deciding.", false],
+        ]
+      );
+      assert.ok(body.findings[0].suggestions.every(({ rationale }) => rationale.length > 0));
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("honors Groq Retry-After on transient rate limits", async () => {
+    let attempts = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "Retry-After": "0" },
+        });
+      }
+      return groqCompletion([]);
+    });
+
+    try {
+      const response = await analyze("A second attempt after a transient rate limit.");
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("X-Analysis-Source"), "groq");
+      assert.equal(attempts, 2);
     } finally {
       fetchMock.mock.restore();
     }
@@ -724,7 +980,7 @@ describe("Groq analysis and rules fallback", () => {
       const response = await analyze("This is 100% guaranteed.");
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("X-Analysis-Source"), "rules-fallback");
-      assert.equal(attempts, 2);
+      assert.equal(attempts, 3);
       const body = await response.json() as {
         findings: Array<{ evidence: string; replacement: string | null; suggestions: unknown[] }>;
         analysisMessage: string;
@@ -734,6 +990,66 @@ describe("Groq analysis and rules fallback", () => {
       assert.match(body.analysisMessage, /AI analysis is unavailable/i);
     } finally {
       fetchMock.mock.restore();
+    }
+  });
+
+  it("falls back safely and logs Groq structured-output validation errors", async () => {
+    const submittedContent = "Private product wording: guaranteed arrival tomorrow.";
+    const apiKey = "secret-validation-test-key";
+    let attempts = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input, init) => {
+      attempts += 1;
+      const requestBody = JSON.parse(String(init?.body));
+      assert.equal(requestBody.response_format.type, "json_schema");
+      assert.equal(requestBody.response_format.json_schema.strict, true);
+      return Response.json(
+        {
+          error: {
+            message: "The supplied response format failed validation.",
+            code: "json_validate_failed",
+            param: "response_format",
+          },
+        },
+        { status: 400 }
+      );
+    });
+    const errorLog = mock.method(console, "error", () => {});
+
+    try {
+      const response = await analyze(submittedContent, { GROQ_API_KEY: apiKey });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("X-Analysis-Source"), "rules-fallback");
+      assert.equal(attempts, 1);
+      const body = await response.json() as {
+        findings: Array<{ replacement: string | null; suggestions: unknown[] }>;
+        analysisSource: string;
+        analysisMessage: string;
+      };
+      assert.equal(body.analysisSource, "rules-fallback");
+      assert.match(body.analysisMessage, /AI analysis is unavailable/i);
+      assert.ok(body.findings.length > 0);
+      assert.ok(body.findings.every(
+        ({ replacement, suggestions }) =>
+          replacement === null && suggestions.length === 0
+      ));
+      assert.equal(JSON.stringify(body).includes("json_validate_failed"), false);
+
+      const providerLog = errorLog.mock.calls.find(
+        ({ arguments: args }) => args[0] === "Groq provider error"
+      );
+      assert.ok(providerLog);
+      assert.deepEqual(providerLog.arguments[1], {
+        status: 400,
+        message: "The supplied response format failed validation.",
+        code: "json_validate_failed",
+        param: "response_format",
+      });
+      const serializedLogs = JSON.stringify(errorLog.mock.calls);
+      assert.equal(serializedLogs.includes(submittedContent), false);
+      assert.equal(serializedLogs.includes(apiKey), false);
+    } finally {
+      fetchMock.mock.restore();
+      errorLog.mock.restore();
     }
   });
 
@@ -766,7 +1082,7 @@ describe("Groq analysis and rules fallback", () => {
       assert.match(body.analysisMessage, /AI analysis is unavailable/i);
       assert.equal(JSON.stringify(body).includes("invalid_request_error"), false);
 
-      assert.equal(errorLog.mock.calls.length, 1);
+      assert.equal(errorLog.mock.calls.length, 2);
       const [eventName, details] = errorLog.mock.calls[0].arguments as [
         string,
         { status: number; message: string; code: string; param: string },
