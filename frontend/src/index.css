@@ -37,25 +37,25 @@ main h1 { letter-spacing: -0.04em; }
 main .text-text-secondary { color: #718096; }
 
 /* Navigation rail */
-aside.fixed.lg\\:sticky {
+aside.fixed.lg\:sticky {
   width: 260px;
   background: linear-gradient(180deg, #102b50 0%, #0b2342 100%);
   border-right: 1px solid rgb(255 255 255 / 7%);
   box-shadow: 10px 0 32px rgb(15 35 65 / 7%);
 }
-aside.fixed.lg\\:sticky > div:first-child { padding: 25px 22px; }
-aside.fixed.lg\\:sticky nav { padding: 18px 13px; }
-aside.fixed.lg\\:sticky nav button {
+aside.fixed.lg\:sticky > div:first-child { padding: 25px 22px; }
+aside.fixed.lg\:sticky nav { padding: 18px 13px; }
+aside.fixed.lg\:sticky nav button {
   min-height: 43px;
   border: 1px solid transparent;
   border-radius: 10px;
   letter-spacing: -0.01em;
 }
-aside.fixed.lg\\:sticky nav button[class*="bg-primary-blue"] {
+aside.fixed.lg\:sticky nav button[class*="bg-primary-blue"] {
   background: linear-gradient(100deg, #2866e8, #1c55c7);
   box-shadow: 0 5px 14px rgb(4 17 43 / 22%);
 }
-aside.fixed.lg\\:sticky nav button:not([class*="bg-primary-blue"]):hover {
+aside.fixed.lg\:sticky nav button:not([class*="bg-primary-blue"]):hover {
   background: rgb(255 255 255 / 7%);
 }
 
@@ -158,7 +158,7 @@ main table tbody tr:last-child { border-bottom: 0; }
   main.flex-1 > div.max-w-7xl { padding-top: 76px; }
 }
 @media (max-width: 640px) {
-  aside.fixed.lg\\:sticky { width: min(280px, 86vw); }
+  aside.fixed.lg\:sticky { width: min(280px, 86vw); }
   main.flex-1 > div.max-w-7xl { padding: 76px 16px 32px; }
   main .grid { gap: 12px; }
   main .bg-white.rounded-xl.border,
