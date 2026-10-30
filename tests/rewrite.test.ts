@@ -22,7 +22,7 @@ function createFinding(overrides: Partial<Finding> = {}): Finding {
 }
 
 describe("Rewrite application", () => {
-  it("does not fabricate findings for arbitrary content in explicit demo mode", async () => {
+  it("reports analysis unavailable instead of generating demo findings", async () => {
     const values = new Map<string, string>();
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
@@ -35,10 +35,10 @@ describe("Rewrite application", () => {
     const { analyze, setFakeMode } = await import("../frontend/src/api.ts");
     setFakeMode(true);
     try {
-      const result = await analyze(
-        "Our editorial team publishes clear updates for readers every Monday."
+      await assert.rejects(
+        analyze("Our editorial team publishes clear updates for readers every Monday."),
+        /AI analysis is unavailable while demo mode is enabled/
       );
-      assert.deepEqual(result.findings, []);
     } finally {
       setFakeMode(false);
     }

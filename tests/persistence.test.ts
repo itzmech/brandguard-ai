@@ -47,9 +47,10 @@ describe("Workflow & Decision Persistence Across Refresh", () => {
     ];
 
     // Initial state before decisions
-    const initialDecisions: Record<string, "pending" | "applied" | "rejected"> = {
+    const initialDecisions: Record<string, "pending" | "accepted" | "applied" | "rejected"> = {
       "f-101": "pending",
       "f-102": "pending",
+      "f-103": "pending",
     };
 
     // User applies f-101 and rejects f-102
@@ -57,6 +58,7 @@ describe("Workflow & Decision Persistence Across Refresh", () => {
       ...initialDecisions,
       "f-101": "applied" as const,
       "f-102": "rejected" as const,
+      "f-103": "accepted" as const,
     };
 
     // Persist to storage
@@ -73,6 +75,7 @@ describe("Workflow & Decision Persistence Across Refresh", () => {
 
     assert.equal(restoredDecisions["f-101"], "applied");
     assert.equal(restoredDecisions["f-102"], "rejected");
+    assert.equal(restoredDecisions["f-103"], "accepted");
   });
 
   it("preserves evidence, explanation, and replacement in saved review details", () => {

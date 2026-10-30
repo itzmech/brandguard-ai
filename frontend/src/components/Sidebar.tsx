@@ -165,21 +165,18 @@ export function Sidebar({ currentView, onNavigate }: SidebarProps) {
           })}
         </nav>
 
-        {/* User profile area */}
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-xs font-bold text-white tracking-wider">
-                AK
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-white leading-tight">Alex Kim</div>
-                <div className="text-xs text-slate-400 leading-tight">Marketing Manager</div>
-              </div>
+        <div className="border-t border-white/10 p-4">
+          <div className="flex items-center gap-3 rounded-lg p-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-600 bg-slate-700 text-white">
+              <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.5c0 4.3 3.2 7.7 7.5 9.5 4.3-1.8 7.5-5.2 7.5-9.5V6L12 3Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
+              </svg>
             </div>
-            <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            <div className="min-w-0 text-left">
+              <div className="text-sm font-semibold leading-tight text-white">Your workspace</div>
+              <div className="text-xs leading-tight text-slate-400">Content reviews</div>
+            </div>
           </div>
         </div>
       </aside>

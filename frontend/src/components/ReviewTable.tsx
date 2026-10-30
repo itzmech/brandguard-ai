@@ -2,13 +2,14 @@ import { useState, useMemo } from 'react';
 import { ReviewRow } from './ReviewRow';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
+import { StatusBadge } from './StatusBadge';
+import { ReviewActionsMenu } from './ReviewActionsMenu';
 import type { Review } from '../types';
 
 type ReviewTableProps = {
   reviews: Review[];
   onRowClick: (id: string) => void;
   onDelete?: (id: string) => void;
-  onNewReview?: () => void;
   loading?: boolean;
   error?: string | null;
   defaultStatusFilter?: string;
@@ -19,7 +20,6 @@ export function ReviewTable({
   reviews,
   onRowClick,
   onDelete,
-  onNewReview,
   loading,
   error,
   defaultStatusFilter = 'all',
@@ -165,21 +165,11 @@ export function ReviewTable({
             </select>
           </div>
 
-          {/* Right action button */}
-          {onNewReview && (
-            <button
-              onClick={onNewReview}
-              className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-            >
-              <span>+</span>
-              <span>New Review</span>
-            </button>
-          )}
         </div>
       )}
 
       {/* Main Table Card */}
-      <div className="bg-white rounded-xl border border-border-default shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border-default bg-white shadow-sm">
         {filtered.length === 0 ? (
           <EmptyState
             icon="🔍"
@@ -198,20 +188,20 @@ export function ReviewTable({
         ) : (
           <>
             {/* Desktop Table View */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left">
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full table-fixed text-left">
                 <thead className="bg-white border-b border-border-default">
                   <tr>
-                    <th className="px-6 py-3 text-xs font-semibold text-slate-500">
+                    <th className="w-[46%] px-6 py-3 text-xs font-semibold text-slate-500">
                       Content
                     </th>
-                    <th className="px-6 py-3 text-xs font-semibold text-slate-500">
+                    <th className="w-[18%] px-6 py-3 text-xs font-semibold text-slate-500">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-xs font-semibold text-slate-500">
+                    <th className="w-[22%] px-6 py-3 text-xs font-semibold text-slate-500">
                       Last Updated
                     </th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500">
+                    <th className="w-[14%] px-6 py-3 text-right text-xs font-semibold text-slate-500">
                       Actions
                     </th>
                   </tr>
@@ -230,26 +220,34 @@ export function ReviewTable({
             </div>
 
             {/* Mobile Card List View */}
-            <div className="md:hidden divide-y divide-border-default">
+            <div className="divide-y divide-border-default lg:hidden">
               {pageReviews.map((review) => {
                 const firstLine = review.content.split('\n')[0].trim();
                 const title = firstLine || 'Untitled Review';
                 return (
-                  <div
-                    key={review.id}
-                    onClick={() => onRowClick(review.id)}
-                    className="p-4 hover:bg-slate-50 cursor-pointer space-y-2 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <h4 className="font-semibold text-sm text-slate-900 line-clamp-1">
-                        {title}
-                      </h4>
-                      <span className="text-xs text-slate-400">View →</span>
+                  <article key={review.id} className="space-y-3 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => onRowClick(review.id)}
+                        className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-blue"
+                      >
+                        <span className="block line-clamp-2 break-words text-sm font-semibold text-slate-900">
+                          {title}
+                        </span>
+                      </button>
+                      <ReviewActionsMenu
+                        onView={() => onRowClick(review.id)}
+                        onDelete={onDelete ? () => onDelete(review.id) : undefined}
+                      />
                     </div>
-                    <div className="flex items-center justify-between pt-1 text-xs text-slate-400">
-                      <span>{new Date(review.updated_at).toLocaleDateString()}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <StatusBadge status={review.status} size="sm" />
+                      <span className="text-xs text-slate-500">
+                        {new Date(review.updated_at).toLocaleDateString()}
+                      </span>
                     </div>
-                  </div>
+                  </article>
                 );
               })}
             </div>

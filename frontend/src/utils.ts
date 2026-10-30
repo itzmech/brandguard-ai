@@ -4,7 +4,22 @@
 // "Apply" replaces only the flagged substring using `replacement`, preserving all
 // surrounding text, punctuation, casing, line breaks, and formatting.
 
-import type { Finding } from './types.ts';
+import type { Finding, FindingDecision } from './types.ts';
+
+export const REVIEW_SUMMARY_MIN_WIDTH = 240;
+export const REVIEW_SUMMARY_MAX_WIDTH = 420;
+
+export function clampReviewSummaryWidth(width: number): number {
+  return Math.min(REVIEW_SUMMARY_MAX_WIDTH, Math.max(REVIEW_SUMMARY_MIN_WIDTH, width));
+}
+
+export function updateFindingDecision(
+  decisions: Record<string, FindingDecision>,
+  findingId: string,
+  decision: FindingDecision
+): Record<string, FindingDecision> {
+  return { ...decisions, [findingId]: decision };
+}
 
 /**
  * Escape a plain string so it can be used as a literal match in a regular expression.
@@ -100,41 +115,59 @@ export function findAlignedEvidence(
 
 export function findEvidenceRange(
   content: string,
-  finding: Pick<Finding, 'evidence' | 'context' | 'targetStart'>
+  finding: Pick<Finding, 'evidence' | 'context' | 'targetStart' | 'targetEnd'>
 ): { start: number; end: number } | null {
-  const { evidence, context, targetStart } = finding;
+  const { evidence, context, targetStart, targetEnd } = finding;
   if (!content || !evidence.trim()) return null;
 
   if (
     typeof targetStart === 'number' &&
     targetStart >= 0 &&
+    (targetEnd === undefined || targetEnd === targetStart + evidence.length) &&
     content.slice(targetStart, targetStart + evidence.length) === evidence
   ) {
     if (!context) {
       return { start: targetStart, end: targetStart + evidence.length };
     }
-    const contextIndex = content.indexOf(context);
-    if (
-      contextIndex >= 0 &&
-      content.indexOf(context, contextIndex + 1) === -1 &&
-      targetStart >= contextIndex &&
-      targetStart + evidence.length <= contextIndex + context.length
-    ) {
+
+    const contextEvidencePositions: number[] = [];
+    let evidencePosition = context.indexOf(evidence);
+    while (evidencePosition !== -1) {
+      contextEvidencePositions.push(evidencePosition);
+      evidencePosition = context.indexOf(evidence, evidencePosition + 1);
+    }
+    if (contextEvidencePositions.some((position) => {
+      const contextStart = targetStart - position;
+      return (
+        contextStart >= 0 &&
+        content.slice(contextStart, contextStart + context.length) === context
+      );
+    })) {
+      return { start: targetStart, end: targetStart + evidence.length };
+    }
+    if (content.indexOf(context) === -1) {
       return { start: targetStart, end: targetStart + evidence.length };
     }
   }
 
   if (context) {
-    const contextIndex = content.indexOf(context);
-    if (contextIndex >= 0 && content.indexOf(context, contextIndex + 1) === -1) {
-      const evidenceIndex = context.indexOf(evidence);
-      if (
-        evidenceIndex >= 0 &&
-        context.indexOf(evidence, evidenceIndex + 1) === -1
-      ) {
-        const start = contextIndex + evidenceIndex;
-        return { start, end: start + evidence.length };
-      }
+    const contextPositions: number[] = [];
+    let contextPosition = content.indexOf(context);
+    while (contextPosition !== -1) {
+      contextPositions.push(contextPosition);
+      contextPosition = content.indexOf(context, contextPosition + 1);
+    }
+    const evidencePositions: number[] = [];
+    let evidencePosition = context.indexOf(evidence);
+    while (evidencePosition !== -1) {
+      evidencePositions.push(evidencePosition);
+      evidencePosition = context.indexOf(evidence, evidencePosition + 1);
+    }
+    const contextTargets = contextPositions.flatMap((position) =>
+      evidencePositions.map((offset) => position + offset)
+    );
+    if (contextTargets.length === 1) {
+      return { start: contextTargets[0], end: contextTargets[0] + evidence.length };
     }
   }
 
@@ -147,7 +180,12 @@ export function findEvidenceRange(
 
 function isSelectedSuggestionSafe(finding: Finding, replacement: string): boolean {
   const selected = finding.suggestions?.find(({ text }) => text === replacement);
-  return Boolean(selected && !selected.requiresVerification);
+  return Boolean(
+    selected &&
+    !selected.requiresVerification &&
+    finding.requiresVerification !== true &&
+    finding.category !== 'needs_verification'
+  );
 }
 
 /**
@@ -167,6 +205,13 @@ export function canApply(
   const rawReplacement = selectedReplacement ?? finding.replacement;
 
   if (typeof rawReplacement !== 'string' || !rawReplacement.trim()) {
+    return false;
+  }
+
+  if (
+    finding.requiresVerification === true ||
+    finding.category === 'needs_verification'
+  ) {
     return false;
   }
 
@@ -220,6 +265,13 @@ export function getApplyDisabledReason(
   }
 
   const rawReplacement = selectedReplacement ?? finding.replacement;
+
+  if (
+    finding.requiresVerification === true ||
+    finding.category === 'needs_verification'
+  ) {
+    return 'This finding contains a claim that must be verified before any rewrite can be applied.';
+  }
 
   if (typeof rawReplacement !== 'string' || !rawReplacement.trim()) {
     return 'Advisory finding: no direct text replacement (external verification or manual editing required).';
@@ -293,6 +345,41 @@ export function applyReplacement(
   };
 }
 
+export function applyAndAcceptReplacement(
+  content: string,
+  finding: Finding,
+  decision: FindingDecision,
+  selectedReplacement?: string
+):
+  | {
+      success: true;
+      newContent: string;
+      evidenceStart: number;
+      evidenceEnd: number;
+      decision: 'accepted';
+    }
+  | { success: false; newContent: string; reason: string } {
+  if (decision === 'accepted' || decision === 'applied') {
+    return {
+      success: false,
+      newContent: content,
+      reason: 'This rewrite has already been applied. Reanalyse before applying it again.',
+    };
+  }
+
+  const result = applyReplacement(content, finding, selectedReplacement);
+  if (!result.success) return result;
+  if (result.newContent === content) {
+    return {
+      success: false,
+      newContent: content,
+      reason: 'The rewrite would not change the content, so the finding was not accepted.',
+    };
+  }
+
+  return { ...result, decision: 'accepted' };
+}
+
 function getSentenceContext(content: string, start: number, end: number): string {
   let contextStart = start;
   while (contextStart > 0 && !/[\n\r.!?]/.test(content[contextStart - 1])) {
@@ -358,6 +445,7 @@ export function invalidateOverlappingFindings(
     return {
       ...finding,
       targetStart: updatedStart,
+      targetEnd: updatedStart + finding.evidence.length,
       context: getSentenceContext(
         updatedContent,
         updatedStart,

@@ -1,9 +1,12 @@
 export type FindingSeverity = "high" | "medium" | "low";
 export type FindingCategory = "risk" | "unsupported_claim" | "needs_verification";
+export type FindingDecision = "pending" | "accepted" | "applied" | "rejected";
 
 export type RewriteSuggestion = {
   text: string;
   requiresVerification: boolean;
+  rationale?: string;
+  uncertainty?: string | null;
 };
 
 export type Finding = {
@@ -13,7 +16,11 @@ export type Finding = {
   evidence: string;
   context?: string;
   targetStart?: number;
+  targetEnd?: number;
   explanation: string;
+  rewriteRationale?: string | null;
+  uncertainty?: string | null;
+  requiresVerification?: boolean;
   replacement?: string | null;
   suggestions?: RewriteSuggestion[];
   /** Deprecated backward-compatibility alias */
@@ -22,7 +29,11 @@ export type Finding = {
 
 export type AnalyzeRequest = { content: string };
 
-export type AnalyzeResponse = { findings: Finding[] };
+export type AnalyzeResponse = {
+  findings: Finding[];
+  analysisSource?: "groq" | "rules-fallback";
+  analysisMessage?: string | null;
+};
 
 export type Review = {
   id: string;

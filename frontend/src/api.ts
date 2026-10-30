@@ -223,116 +223,11 @@ export function isFakeId(id: string): boolean {
   return id.startsWith("rev-mock-") || id.startsWith("fake-");
 }
 
-// Smart fake analyzer when in fake mode
-function fakeAnalyze(content: string): AnalyzeResponse {
-  const findings: Finding[] = [];
-  let counter = 1;
-
-  const rules: Array<{
-    pattern: RegExp;
-    severity: "high" | "medium" | "low";
-    category: "risk" | "unsupported_claim" | "needs_verification";
-    explanation: string;
-    replacement: ((match: string) => string | null) | null;
-  }> = [
-    {
-      // Capture the full problematic claim when a guarantee verb precedes
-      // an absolute percentage claim, so the rewrite replaces the complete
-      // assertion rather than only the noun phrase.
-      pattern: /\b(100% guaranteed|guaranteed to cure|cure acne|eliminate all|forever|100% (?:success|delivery|faultless|perfect|error-free|satisfaction)|guaranteed to double|guranteed to|guarenteed to)\b/gi,
-      severity: "high",
-      category: "risk",
-      explanation: "Absolute outcome guarantees require verifiable evidence before they can be stated as fact; use measured, benefit-oriented language instead.",
-      replacement: null,
-    },
-    {
-      pattern: /\b(miracle\w*|revolutionary|BEST|magic\w*)\b/gi,
-      severity: "high",
-      category: "unsupported_claim",
-      explanation: "Superlatives and unverified exceptionalism can be considered misleading and boastful without clinical proof.",
-      replacement: null,
-    },
-    {
-      pattern: /\b(Get rich quick|Lose \d+ pounds in \d+ weeks without exercise|boost your energy by \d+%|eliminates 100% of errors forever|#1 solution|guaranteed to double your team's output without extra effort|Our product guarantees|we guarantee that|results guaranteed)\b/gi,
-      severity: "high",
-      category: "risk",
-      explanation: "Unsubstantiated numerical or absolute outcome claims require verifiable evidence before they can be stated as fact.",
-      replacement: (match) => {
-        const lowered = match.toLowerCase();
-        if (lowered.includes('#1 solution')) {
-          return 'the solution';
-        }
-        return null;
-      },
-    },
-    {
-      pattern: /\b(doctor-approved|FDA-approved|scientifically proven to work for everyone|clinically proven)\b/gi,
-      severity: "medium",
-      category: "needs_verification",
-      explanation: "Official regulatory or clinical endorsement claims require specific certification or study documentation before publication.",
-      replacement: null, // Advisory finding: external verification needed, do not fake a rewrite
-    },
-    {
-      pattern: /\b(you'll be AMAZED by|unbelievable results|life-changing|you'll love|amazing results)\b/gi,
-      severity: "medium",
-      category: "unsupported_claim",
-      explanation: "Overpromising emotional outcomes can damage credibility and consumer trust.",
-      replacement: null,
-    },
-    {
-      pattern: /\b(Act now|limited time only!*|before it's too late|hurry|time is running out)\b/gi,
-      severity: "low",
-      category: "risk",
-      explanation: "Excessive urgency tactics can trigger spam filters and diminish premium brand perception.",
-      replacement: null,
-    },
-    {
-      pattern: /!{2,}/g,
-      severity: "low",
-      category: "risk",
-      explanation: "Multiple exclamation marks reduce perceived editorial quality and brand professionalism.",
-      replacement: () => ".",
-    },
-  ];
-
-  for (const rule of rules) {
-    const match = rule.pattern.exec(content);
-    if (match) {
-      // When the matched substring is a noun-phrase absolute claim that is
-      // immediately preceded by a guarantee verb, extend the evidence to
-      // include that verb so the rewrite replaces the complete problematic
-      // claim instead of leaving a dangling verb behind.
-      const matchedText = match[0];
-      const precedingSlice = content.slice(Math.max(0, match.index - 12), match.index);
-      const precedingVerb = precedingSlice.match(/(guarantee|guarantees|guaranteed|guarentee|guarenteed|ensure|ensures|assure|assures|promise|promises)\s*$/i);
-      const evidence =
-        precedingVerb
-          ? precedingVerb[0].trim() + ' ' + matchedText
-          : matchedText;
-
-      const replacementText = rule.replacement ? rule.replacement(matchedText) : null;
-
-      findings.push({
-        id: `f-${Date.now()}-${counter++}`,
-        severity: rule.severity,
-        category: rule.category,
-        evidence,
-        explanation: rule.explanation,
-        replacement: replacementText,
-      });
-    }
-  }
-
-  return { findings };
-}
-
 // Analyze content for brand violations
 export async function analyze(content: string): Promise<AnalyzeResponse> {
   USE_FAKE = getFakeMode();
   if (USE_FAKE) {
-    // Simulate brief network latency for realistic feel
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    return fakeAnalyze(content);
+    throw new Error("AI analysis is unavailable while demo mode is enabled.");
   }
   return request<AnalyzeResponse>("/api/analyze", "POST", { content });
 }

@@ -1,255 +1,259 @@
+import { useState } from 'react';
+import type { Finding, FindingDecision } from '../types';
 import { SeverityBadge } from './SeverityBadge';
-import type { Finding } from '../types.ts';
-import { canApply, getApplyDisabledReason } from '../utils.ts';
+import { canApply, findEvidenceRange, getApplyDisabledReason } from '../utils';
 
 type FindingCardProps = {
   finding: Finding;
-  decision: 'pending' | 'applied' | 'rejected';
-  onApply: (replacement?: string) => void;
+  decision: FindingDecision;
+  onAcceptAndApply: (replacement?: string) => void;
   onReject: () => void;
   disabled?: boolean;
   content?: string;
 };
 
-function getCategoryBadge(category?: string) {
-  if (category === 'risk') {
-    return (
-      <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-        <span>🛡️</span>
-        <span>Compliance Risk</span>
-      </span>
-    );
-  }
-  if (category === 'unsupported_claim') {
-    return (
-      <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-        <span>⚠️</span>
-        <span>Unsupported Claim</span>
-      </span>
-    );
-  }
-  if (category === 'needs_verification') {
-    return (
-      <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-        <span>🔍</span>
-        <span>Needs Verification</span>
-      </span>
-    );
-  }
-  return null;
-}
+const categoryLabels = {
+  risk: 'Compliance risk',
+  unsupported_claim: 'Unsupported claim',
+  needs_verification: 'Needs verification',
+} as const;
 
-function getFindingTitle(finding: Finding): string {
-  if (finding.category === 'needs_verification') {
-    return 'Claim Requiring Source Verification';
-  }
-  if (finding.category === 'unsupported_claim') {
-    return 'Unsupported or Superlative Claim';
-  }
-  if (finding.category === 'risk') {
-    return 'Regulatory / Legal Compliance Risk';
-  }
-
-  const expl = finding.explanation.toLowerCase();
-  const evid = finding.evidence.toLowerCase();
-  if (expl.includes('superlative') || evid.includes('best')) {
-    return 'Use of Superlative';
-  }
-  if (expl.includes('overpromising') || expl.includes('emotional') || evid.includes('amazed')) {
-    return 'Overpromising Outcomes';
-  }
-  if (expl.includes('urgency') || expl.includes('exclamation') || evid.includes('limited time')) {
-    return 'Excessive Urgency';
-  }
-  if (expl.includes('guarantee') || expl.includes('cure') || evid.includes('100%')) {
-    return 'Unverified Absolute Claim';
-  }
-  if (expl.includes('regulatory') || expl.includes('fda') || expl.includes('doctor')) {
-    return 'Unsubstantiated Endorsement';
-  }
-  return 'Compliance Finding';
-}
+const decisionLabels: Record<FindingDecision, string> = {
+  pending: 'Needs review',
+  accepted: 'Accepted',
+  applied: 'Rewrite applied',
+  rejected: 'Rejected',
+};
 
 export function FindingCard({
   finding,
   decision,
-  onApply,
+  onAcceptAndApply,
   onReject,
   disabled = false,
   content = '',
 }: FindingCardProps) {
-  const title = getFindingTitle(finding);
-  const canBeApplied = canApply(finding, content);
-  const disabledReason = getApplyDisabledReason(finding, content);
-  const proposedReplacement =
+  const [expanded, setExpanded] = useState(true);
+  const evidenceRange = content ? findEvidenceRange(content, finding) : null;
+  const suggestions = finding.suggestions ?? [];
+  const directReplacement =
     typeof finding.replacement === 'string' && finding.replacement.trim()
       ? finding.replacement
       : null;
+  const showDirectReplacement =
+    directReplacement !== null &&
+    !suggestions.some(({ text }) => text === directReplacement);
+  const directReplacementCanApply = directReplacement
+    ? canApply(finding, content) && decision !== 'accepted' && decision !== 'applied'
+    : false;
+  const directReplacementReason = directReplacement
+    ? decision === 'accepted' || decision === 'applied'
+      ? 'This finding has already been applied. Reanalyse the content before applying it again.'
+      : getApplyDisabledReason(finding, content)
+    : '';
+  const alreadyApplied = decision === 'accepted' || decision === 'applied';
+  const cardTint =
+    finding.severity === 'high'
+      ? 'border-rose-200 bg-rose-50/30'
+      : finding.severity === 'medium'
+        ? 'border-amber-200 bg-amber-50/30'
+        : 'border-emerald-200 bg-emerald-50/20';
 
   return (
-    <div className="bg-white rounded-xl border border-border-default p-4 shadow-sm hover:border-slate-300 transition-all">
-      {/* Top row: Badges on left, Action on right */}
-      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <SeverityBadge severity={finding.severity} variant="dot" />
-          {getCategoryBadge(finding.category)}
+    <article className={`rounded-xl border p-4 sm:p-5 shadow-sm ${cardTint}`}>
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <SeverityBadge severity={finding.severity} variant="pill" size="sm" />
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+              {decisionLabels[decision]}
+            </span>
+            {finding.category && (
+              <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-800">
+                {categoryLabels[finding.category]}
+              </span>
+            )}
+          </div>
+          <p className="mt-2 break-words text-sm leading-relaxed text-slate-700">
+            {finding.explanation}
+          </p>
+          {finding.uncertainty && (
+            <p className="mt-2 text-xs leading-relaxed text-amber-800">
+              Verification needed: {finding.uncertainty}
+            </p>
+          )}
+          {finding.rewriteRationale && (finding.suggestions?.length ?? 0) === 0 && (
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
+              Rewrite rationale: {finding.rewriteRationale}
+            </p>
+          )}
         </div>
         <button
-          onClick={() => onApply()}
-          disabled={disabled || decision === 'applied' || !canBeApplied}
-          className="border border-slate-200 bg-white hover:bg-slate-50 text-primary-blue px-2.5 py-0.5 rounded text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          title={decision === 'applied' ? 'Already applied' : !canBeApplied ? disabledReason : 'Apply suggested rewrite'}
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={`finding-details-${finding.id}`}
+          onClick={() => setExpanded((isExpanded) => !isExpanded)}
+          className="shrink-0 rounded-md border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition-colors hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
         >
-          {decision === 'applied' ? 'Applied' : canBeApplied ? 'Apply' : 'View'}
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </header>
+
+      <div id={`finding-details-${finding.id}`} className="mt-4" hidden={!expanded}>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-3.5">
+              <h3 className="mb-2 text-sm font-semibold text-slate-900">
+                Why is this a concern?
+              </h3>
+              <p className="break-words text-sm leading-relaxed text-slate-700">
+                {finding.explanation}
+              </p>
+            </section>
+
+            <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-3.5">
+              <h3 className="mb-2 text-sm font-semibold text-slate-900">
+                Original matched text
+              </h3>
+              <blockquote className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm leading-relaxed text-rose-950">
+                {finding.evidence}
+              </blockquote>
+              <p className="mt-2 text-xs text-slate-500">
+                {evidenceRange
+                  ? `Characters ${evidenceRange.start + 1}–${evidenceRange.end}`
+                  : 'Source position unavailable'}
+              </p>
+            </section>
+
+          </div>
+
+          <section className="mt-4 rounded-lg border border-violet-200 bg-violet-50/40 p-3.5 sm:p-4">
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-slate-900">Suggested Rewrites</h3>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                Each option rewrites only the matched passage.
+              </p>
+            </div>
+            {suggestions.length > 0 || showDirectReplacement ? (
+              <ul className="space-y-2.5">
+                {showDirectReplacement && directReplacement && (
+                  <li className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500">Original matched text</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+                          {finding.evidence}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-violet-700">Complete proposed replacement</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+                          {directReplacement}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                      {!directReplacementCanApply && directReplacementReason && (
+                        <p className="max-w-56 text-xs text-amber-800">{directReplacementReason}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onAcceptAndApply()}
+                        disabled={disabled || !directReplacementCanApply}
+                        title={
+                          directReplacementCanApply
+                            ? 'Apply this replacement and accept the finding'
+                            : directReplacementReason
+                        }
+                        className="min-h-11 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {alreadyApplied ? 'Accepted & Applied' : 'Accept & Apply'}
+                      </button>
+                    </div>
+                  </li>
+                )}
+                {suggestions.map((suggestion, index) => {
+                  const canApplySuggestion =
+                    !alreadyApplied &&
+                    !suggestion.requiresVerification &&
+                    canApply(finding, content, suggestion.text);
+                  const reason = alreadyApplied
+                    ? 'This finding has already been applied. Reanalyse the content before applying it again.'
+                    : suggestion.requiresVerification
+                      ? 'Verify this wording before applying it.'
+                      : getApplyDisabledReason(finding, content, suggestion.text);
+
+                  return (
+                    <li
+                      key={`${finding.id}-suggestion-${index}`}
+                      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold text-slate-500">Original matched text</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+                              {finding.evidence}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-violet-700">Complete proposed replacement</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+                              {suggestion.text}
+                            </p>
+                          </div>
+                        </div>
+                        {suggestion.requiresVerification && (
+                          <p className="mt-1 text-xs font-medium text-amber-800">
+                            Requires evidence or verification before use.
+                          </p>
+                        )}
+                        {suggestion.rationale && (
+                          <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                            Rewrite rationale: {suggestion.rationale}
+                          </p>
+                        )}
+                        {!canApplySuggestion && !suggestion.requiresVerification && (
+                          <p className="mt-1 text-xs text-amber-800">{reason}</p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                        {!canApplySuggestion && (
+                          <p className="max-w-56 text-xs text-amber-800">{reason}</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onAcceptAndApply(suggestion.text)}
+                          disabled={disabled || !canApplySuggestion}
+                          title={canApplySuggestion ? 'Apply this rewrite and accept the finding' : reason}
+                          className="min-h-11 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {alreadyApplied ? 'Accepted & Applied' : 'Accept & Apply'}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm leading-relaxed text-slate-600">
+                No safe complete rewrite was returned for this finding. Review the matched text and edit the content manually if needed.
+              </p>
+            )}
+          </section>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-200/80 pt-4">
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={disabled}
+          aria-pressed={decision === 'rejected'}
+          className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span aria-hidden="true">×</span>
+          {decision === 'rejected' ? 'Finding Rejected' : 'Reject Finding'}
         </button>
       </div>
-
-      {/* Title */}
-      <h4 className="text-sm font-bold text-slate-900 mb-1">{title}</h4>
-
-      {/* Explanation displayed strictly as Guidance */}
-      <p className="text-xs text-slate-600 leading-relaxed mb-3">
-        {finding.explanation}
-      </p>
-
-      {/* Evidence snippet */}
-      <div className="flex items-center gap-1.5 text-xs mb-3 flex-wrap">
-        <span className="text-slate-500 font-medium text-xs">Evidence:</span>
-        <span className="bg-blue-50 text-blue-700 font-medium px-2 py-0.5 rounded border border-blue-100 font-mono text-xs">
-          {finding.evidence}
-        </span>
-      </div>
-
-      {/* Proposed Replacement box (Only shown when a valid replacement exists and is applicable) */}
-      {proposedReplacement && canBeApplied ? (
-        <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg p-2.5 mb-3 text-xs">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-emerald-800 font-semibold uppercase text-[10px] tracking-wider">
-              ✨ Proposed Replacement
-            </span>
-            <span className="text-[10px] text-emerald-700 font-normal">Ready to insert</span>
-          </div>
-          <p className="text-emerald-950 font-medium font-sans">
-            {proposedReplacement}
-          </p>
-        </div>
-      ) : null}
-
-      {/* Advisory Notice when replacement is not available or not applicable */}
-      {!canBeApplied && decision !== 'applied' && (
-        <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5 mb-3 text-xs text-amber-900">
-          <span className="text-amber-800 font-semibold uppercase text-[10px] tracking-wider block mb-0.5">
-            ℹ️ Advisory Finding
-          </span>
-          <p className="text-[11px] text-amber-800">
-            {disabledReason}
-          </p>
-        </div>
-      )}
-
-      {finding.suggestions && finding.suggestions.length > 0 && (
-        <div className="mb-3 space-y-2" aria-label="Rewrite suggestions">
-          <h5 className="text-xs font-semibold text-slate-700">Rewrite suggestions</h5>
-          {finding.suggestions.slice(0, 3).map((suggestion, index) => {
-            const suggestionCanApply =
-              !suggestion.requiresVerification &&
-              canApply(finding, content, suggestion.text);
-            const suggestionDisabledReason = suggestion.requiresVerification
-              ? 'Verify this wording before applying it.'
-              : getApplyDisabledReason(finding, content, suggestion.text);
-
-            return (
-              <div
-                key={`${finding.id}-suggestion-${index}`}
-                className="flex flex-col gap-2 border-t border-slate-100 pt-2 sm:flex-row sm:items-start sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="text-xs leading-relaxed text-slate-800 break-words">
-                    {suggestion.text}
-                  </p>
-                  {suggestion.requiresVerification && (
-                    <p className="mt-1 text-[11px] font-medium text-amber-800">
-                      Requires evidence or verification before use.
-                    </p>
-                  )}
-                  {!suggestionCanApply && !suggestion.requiresVerification && (
-                    <p className="mt-1 text-[11px] text-amber-800">
-                      {suggestionDisabledReason}
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onApply(suggestion.text)}
-                  disabled={
-                    disabled ||
-                    decision === 'applied' ||
-                    !suggestionCanApply
-                  }
-                  className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-primary-blue transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-blue disabled:cursor-not-allowed disabled:opacity-50"
-                  title={
-                    suggestionCanApply
-                      ? 'Replace only the selected evidence with this suggestion'
-                      : suggestionDisabledReason
-                  }
-                >
-                  Apply Suggestion
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Actions */}
-      {decision === 'pending' && (
-        <div className="flex items-center gap-2 pt-1 border-t border-border-default/50">
-          <button
-            onClick={() => onApply()}
-            disabled={disabled || !canBeApplied}
-            className="flex-1 bg-primary-blue hover:bg-blue-hover text-white py-1.5 px-3 rounded-lg text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title={!canBeApplied ? disabledReason : 'Apply suggested rewrite to editor'}
-          >
-            <span>✓</span> {canBeApplied ? 'Apply Replacement' : 'Advisory Only'}
-          </button>
-          <button
-            onClick={onReject}
-            disabled={disabled}
-            className="flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-border-default py-1.5 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            <span>✕</span> Reject
-          </button>
-        </div>
-      )}
-
-      {decision === 'applied' && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-xs flex items-center justify-between text-emerald-800 font-medium">
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
-              ✓
-            </span>
-            <span>Replacement applied to content</span>
-          </div>
-          <span className="text-[11px] text-emerald-700 font-normal">Addressed</span>
-        </div>
-      )}
-
-      {decision === 'rejected' && (
-        <div className="bg-slate-100 border border-slate-200 rounded-lg p-2 text-xs flex items-center justify-between text-slate-600 font-medium">
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">✕</span>
-            <span>Suggestion dismissed</span>
-          </div>
-          <button
-            onClick={() => onApply()}
-            disabled={disabled || !canBeApplied}
-            className="text-primary-blue hover:underline text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title={!canBeApplied ? disabledReason : 'Undo dismissal and apply replacement'}
-          >
-            Undo
-          </button>
-        </div>
-      )}
-    </div>
+    </article>
   );
 }

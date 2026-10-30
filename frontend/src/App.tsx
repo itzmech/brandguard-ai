@@ -1,7 +1,19 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { Finding, Review } from './types';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
+import type { Finding, FindingDecision, Review } from './types';
 import * as api from './api';
-import { applyReplacement, invalidateOverlappingFindings } from './utils';
+import {
+  applyAndAcceptReplacement,
+  clampReviewSummaryWidth,
+  invalidateOverlappingFindings,
+  REVIEW_SUMMARY_MAX_WIDTH,
+  REVIEW_SUMMARY_MIN_WIDTH,
+  updateFindingDecision,
+} from './utils';
 import { Sidebar } from './components/Sidebar';
 import { PageHeader } from './components/PageHeader';
 import { MetricCard } from './components/MetricCard';
@@ -14,6 +26,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { ReviewDetailsView } from './components/ReviewDetailsView';
 import { TemplatesView } from './components/TemplatesView';
 import { SettingsView } from './components/SettingsView';
+import { ReviewSummary } from './components/ReviewSummary';
 import { samples } from './sampleContent';
 
 type ViewMode =
@@ -26,6 +39,10 @@ type ViewMode =
   | 'templates'
   | 'settings';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export default function App() {
   // Navigation & View state
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
@@ -35,15 +52,21 @@ export default function App() {
   const [content, setContent] = useState('');
   const [findings, setFindings] = useState<Finding[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [analysisMessage, setAnalysisMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [slowServer, setSlowServer] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
-  const [decisions, setDecisions] = useState<Record<string, 'pending' | 'applied' | 'rejected'>>({});
+  const [decisions, setDecisions] = useState<Record<string, FindingDecision>>({});
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [reviewStatus, setReviewStatus] = useState<Review['status']>('draft');
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const appliedFindingIds = useRef(new Set<string>());
   const [sampleIndex, setSampleIndex] = useState(0);
+  const [findingSort, setFindingSort] = useState<'risk-desc' | 'risk-asc'>('risk-desc');
+  const [summaryWidth, setSummaryWidth] = useState(290);
+  const [isResizingSummary, setIsResizingSummary] = useState(false);
+  const resizeStart = useRef<{ pointerX: number; width: number } | null>(null);
 
   // Settings state
   const [isApproverMode, setIsApproverMode] = useState(false);
@@ -62,27 +85,93 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const resizeSummary = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!resizeStart.current) return;
+    const delta = resizeStart.current.pointerX - event.clientX;
+    setSummaryWidth(clampReviewSummaryWidth(resizeStart.current.width + delta));
+  };
+
+  const startSummaryResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!window.matchMedia('(min-width: 1280px)').matches) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStart.current = { pointerX: event.clientX, width: summaryWidth };
+    setIsResizingSummary(true);
+  };
+
+  const stopSummaryResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resizeStart.current = null;
+    setIsResizingSummary(false);
+  };
+
+  const handleSummaryResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!window.matchMedia('(min-width: 1280px)').matches) return;
+    const adjustment = event.shiftKey ? 40 : 16;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowLeft' ? 1 : -1;
+      setSummaryWidth((width) =>
+        clampReviewSummaryWidth(width + direction * adjustment)
+      );
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setSummaryWidth(REVIEW_SUMMARY_MIN_WIDTH);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setSummaryWidth(REVIEW_SUMMARY_MAX_WIDTH);
+    }
+  };
+
+  useEffect(() => {
+    if (!isResizingSummary) return;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+    };
+  }, [isResizingSummary]);
+
   // Helper to load decisions persisted across page refreshes
-  const loadDecisionsForReview = (id: string, currentFindings: Finding[]): Record<string, 'pending' | 'applied' | 'rejected'> => {
+  const loadDecisionsForReview = (id: string, currentFindings: Finding[]): Record<string, FindingDecision> => {
+    const initial: Record<string, FindingDecision> = {};
+    currentFindings.forEach((finding) => {
+      initial[finding.id] = 'pending';
+    });
+
     try {
       const saved = localStorage.getItem(`brandguard_decisions_${id}`);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: unknown = JSON.parse(saved);
+        if (isRecord(parsed)) {
+          for (const finding of currentFindings) {
+            const value = parsed[finding.id];
+            if (
+              value === 'pending' ||
+              value === 'accepted' ||
+              value === 'applied' ||
+              value === 'rejected'
+            ) {
+              initial[finding.id] = value;
+            }
+          }
+        }
       }
     } catch {
-      // fallback
+      return initial;
     }
-    const initial: Record<string, 'pending' | 'applied' | 'rejected'> = {};
-    currentFindings.forEach((f) => {
-      initial[f.id] = 'pending';
-    });
     return initial;
   };
 
   // Helper to save decisions persisted across page refreshes
   const saveDecisionsForReview = (
     id: string | null,
-    newDecisions: Record<string, 'pending' | 'applied' | 'rejected'>
+    newDecisions: Record<string, FindingDecision>
   ) => {
     try {
       const key = id ? `brandguard_decisions_${id}` : 'brandguard_decisions_current';
@@ -126,6 +215,7 @@ export default function App() {
           if (ignore) return;
           setContent(review.content);
           setFindings(review.findings);
+          appliedFindingIds.current.clear();
           setReviewId(review.id);
           setReviewStatus(review.status);
           setHasAnalyzed(review.findings.length > 0 || review.status !== 'draft');
@@ -149,10 +239,12 @@ export default function App() {
       const review = await api.loadReview(id);
       setContent(review.content);
       setFindings(review.findings);
+      appliedFindingIds.current.clear();
       setReviewId(review.id);
       setReviewStatus(review.status);
       setHasAnalyzed(true);
       setError(null);
+      setAnalysisMessage(null);
 
       const loadedDecisions = loadDecisionsForReview(review.id, review.findings);
       setDecisions(loadedDecisions);
@@ -176,7 +268,9 @@ export default function App() {
     localStorage.removeItem('brandguard_decisions_current');
     setContent('');
     setFindings([]);
+    appliedFindingIds.current.clear();
     setError(null);
+    setAnalysisMessage(null);
     setHasAnalyzed(false);
     setDecisions({});
     setReviewId(null);
@@ -204,6 +298,7 @@ export default function App() {
     if (!content.trim()) return;
     setLoading(true);
     setError(null);
+    setAnalysisMessage(null);
     setSlowServer(false);
 
     const timer = setTimeout(() => {
@@ -213,20 +308,31 @@ export default function App() {
     try {
       const result = await api.analyze(content);
       setFindings(result.findings);
+      appliedFindingIds.current.clear();
+      setAnalysisMessage(result.analysisMessage ?? null);
       setHasAnalyzed(true);
 
-      const initialDecisions: Record<string, 'pending' | 'applied' | 'rejected'> = {};
+      const initialDecisions: Record<string, FindingDecision> = {};
       result.findings.forEach((f) => {
         initialDecisions[f.id] = 'pending';
       });
       setDecisions(initialDecisions);
       saveDecisionsForReview(reviewId, initialDecisions);
-      showToast(
-        result.findings.length > 0
-          ? `Analysis complete: ${result.findings.length} ${result.findings.length === 1 ? 'issue' : 'issues'} found`
-          : 'Analysis complete: No brand issues found!',
-        result.findings.length > 0 ? 'info' : 'success'
-      );
+      if (result.analysisSource === 'rules-fallback') {
+        showToast(
+          result.findings.length > 0
+            ? `AI unavailable: fallback checks found ${result.findings.length} potential ${result.findings.length === 1 ? 'issue' : 'issues'}`
+            : 'AI unavailable: fallback checks found no matching rules',
+          'info'
+        );
+      } else {
+        showToast(
+          result.findings.length > 0
+            ? `Analysis complete: ${result.findings.length} ${result.findings.length === 1 ? 'issue' : 'issues'} found`
+            : 'Analysis complete: No brand issues found!',
+          result.findings.length > 0 ? 'info' : 'success'
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during analysis');
     } finally {
@@ -236,16 +342,26 @@ export default function App() {
     }
   };
 
-  // Apply a finding's suggested rewrite, replacing only the flagged
-  // substring with the exact replacement text. This deliberately does not insert
-  // explanation or advice text.
-  const handleApply = (finding: Finding, selectedReplacement?: string) => {
-    const result = applyReplacement(content, finding, selectedReplacement);
-    if (!result.success) {
-      setError(result.reason || 'No rewrite is available for this finding. Edit manually.');
-      showToast(result.reason || 'No rewrite available for this finding', 'error');
+  const handleAcceptAndApply = (
+    finding: Finding,
+    selectedReplacement?: string
+  ) => {
+    if (appliedFindingIds.current.has(finding.id)) {
+      showToast('This rewrite has already been applied. Reanalyse before applying it again.', 'error');
       return;
     }
+
+    const result = applyAndAcceptReplacement(
+      content,
+      finding,
+      decisions[finding.id] ?? 'pending',
+      selectedReplacement
+    );
+    if (!result.success) {
+      showToast(result.reason || 'This rewrite could not be applied. Reanalyse the content and try again.', 'error');
+      return;
+    }
+    appliedFindingIds.current.add(finding.id);
     setFindings((current) =>
       invalidateOverlappingFindings(
         content,
@@ -258,18 +374,19 @@ export default function App() {
       )
     );
     setContent(result.newContent);
+    setSavedAt(null);
     setDecisions((prev) => {
-      const updated = { ...prev, [finding.id]: 'applied' as const };
+      const updated = updateFindingDecision(prev, finding.id, result.decision);
       saveDecisionsForReview(reviewId, updated);
       return updated;
     });
-    showToast('Applied replacement rewrite to editor');
+    showToast('Rewrite applied and finding accepted');
   };
 
   // Reject finding suggestion
   const handleReject = (findingId: string) => {
     setDecisions((prev) => {
-      const updated = { ...prev, [findingId]: 'rejected' as const };
+      const updated = updateFindingDecision(prev, findingId, 'rejected');
       saveDecisionsForReview(reviewId, updated);
       return updated;
     });
@@ -289,6 +406,8 @@ export default function App() {
         review = await api.createReview(content, findings);
       }
       localStorage.setItem('brandguard_review_id', review.id);
+      saveDecisionsForReview(review.id, decisions);
+      localStorage.removeItem('brandguard_decisions_current');
       setReviewId(review.id);
       setReviewStatus(review.status);
 
@@ -408,14 +527,19 @@ export default function App() {
     return firstLine ? (firstLine.length > 45 ? firstLine.substring(0, 45) + '...' : firstLine) : 'Review Details';
   }, [reviewId, content]);
 
-  // Finding summary counts
-  const highCount = findings.filter((f) => f.severity === 'high').length;
-  const mediumCount = findings.filter((f) => f.severity === 'medium').length;
-  const lowCount = findings.filter((f) => f.severity === 'low').length;
+  const orderedFindings = useMemo(
+    () =>
+      [...findings].sort((a, b) => {
+        const rank = (s: Finding['severity']) => (s === 'high' ? 0 : s === 'medium' ? 1 : 2);
+        const difference = rank(a.severity) - rank(b.severity);
+        return findingSort === 'risk-desc' ? difference : -difference;
+      }),
+    [findings, findingSort]
+  );
 
   const isLocked = reviewStatus === 'approved';
   const canSave = reviewStatus === 'draft' || reviewStatus === 'changes_requested';
-  const canSubmit = (reviewStatus === 'draft' || reviewStatus === 'changes_requested') && content.trim().length > 0;
+  const canSubmit = canSave && content.trim().length > 0;
 
   // Selected review object for ReviewDetailsView
   const currentReviewObj: Review = useMemo(() => {
@@ -425,7 +549,7 @@ export default function App() {
       content,
       status: reviewStatus,
       findings,
-      updated_at: existing ? existing.updated_at : '2024-05-20T10:30:00.000Z',
+      updated_at: existing?.updated_at ?? '',
     };
   }, [reviewId, content, reviewStatus, findings, allReviews]);
 
@@ -455,15 +579,15 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-6 lg:py-8">
           {/* ========================================================= */}
           {/* 1. DASHBOARD VIEW (Matching Top-Left of Mockup)           */}
           {/* ========================================================= */}
           {currentView === 'dashboard' && (
             <div className="space-y-6">
               <PageHeader
-                title="Good morning, Alex 👋"
-                subtitle="Here's what's happening with your content reviews."
+                title="Your workspace"
+                subtitle="Review content and track approval activity."
                 action={
                   <button
                     onClick={handleStartNewReview}
@@ -486,7 +610,6 @@ export default function App() {
                   label="Total Reviews"
                   value={metrics.total}
                   color="blue"
-                  trend={{ text: '18% from last month', isPositive: true }}
                   onClick={() => setCurrentView('my-reviews')}
                 />
                 <MetricCard
@@ -498,7 +621,6 @@ export default function App() {
                   label="Pending Approval"
                   value={metrics.pending}
                   color="indigo"
-                  trend={{ text: '8% from last month', isPositive: false }}
                   onClick={() => setCurrentView('pending')}
                 />
                 <MetricCard
@@ -510,7 +632,6 @@ export default function App() {
                   label="Approved"
                   value={metrics.approved}
                   color="green"
-                  trend={{ text: '25% from last month', isPositive: true }}
                   onClick={() => setCurrentView('approved')}
                 />
                 <MetricCard
@@ -522,7 +643,6 @@ export default function App() {
                   label="Changes Requested"
                   value={metrics.changesRequested}
                   color="amber"
-                  trend={{ text: '12% from last month', isPositive: true, color: 'amber' }}
                   onClick={() => setCurrentView('changes-requested')}
                 />
               </div>
@@ -579,7 +699,7 @@ export default function App() {
                   onSubmit={handleSubmit}
                   onApprove={handleApprove}
                   onRequestChanges={handleRequestChanges}
-                  onApply={handleApply}
+                  onAcceptAndApply={handleAcceptAndApply}
                   onReject={handleReject}
                   onEditWorkspace={() => setWorkspaceMode('editor')}
                   isApproverMode={isApproverMode}
@@ -646,7 +766,7 @@ export default function App() {
                           <button
                             onClick={handleSubmit}
                             disabled={saving}
-                            className="bg-primary-blue hover:bg-blue-hover text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            className="bg-violet-700 hover:bg-violet-800 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                           >
                             <span>Submit for Approval</span>
                           </button>
@@ -666,25 +786,23 @@ export default function App() {
                     }
                   />
 
-                  {/* Timestamp feedback if saved */}
                   {savedAt && (
-                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3.5 py-2 rounded-lg flex items-center justify-between">
-                      <span>✓ Draft saved at {savedAt}</span>
-                      {reviewId && (
-                        <span className="font-mono text-[11px] text-emerald-700">
-                          ID: {reviewId}
-                        </span>
-                      )}
-                    </div>
+                    <p className="text-right text-xs text-slate-500">
+                      Draft saved at <time dateTime={savedAt}>{savedAt}</time>
+                    </p>
                   )}
 
-                  {/* Single Continuous Review Workspace: 2-Column Desktop matching Bottom-Left of Mockup */}
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                    {/* Left Column: Content Editor (7 cols) */}
-                    <div className="lg:col-span-7 h-full">
+                  <div
+                    className="review-workspace-layout"
+                    style={{ '--review-summary-width': `${summaryWidth}px` } as CSSProperties}
+                  >
+                    <div className="min-w-0 space-y-6">
                       <ContentEditor
                         content={content}
-                        onChange={setContent}
+                        onChange={(updatedContent) => {
+                          setContent(updatedContent);
+                          setAnalysisMessage(null);
+                        }}
                         onLoadSample={handleLoadSample}
                         onAnalyze={handleAnalyze}
                         loading={loading}
@@ -693,59 +811,63 @@ export default function App() {
                         onRetry={handleAnalyze}
                         disabled={loading || saving}
                         status={reviewStatus}
+                        hasAnalyzed={hasAnalyzed}
                         isReadOnly={isLocked}
                       />
-                    </div>
 
-                    {/* Right Column: Findings Panel (5 cols) */}
-                    <div className="lg:col-span-5 space-y-4">
-                      <div className="bg-white rounded-xl border border-border-default shadow-sm p-5">
-                        {/* Findings Header matching mockup: Findings (3) */}
+                      <section
+                        className="rounded-xl border border-border-default bg-white p-5 shadow-sm"
+                        aria-labelledby="findings-heading"
+                      >
                         <div className="flex items-center justify-between pb-3 mb-4 border-b border-border-default">
-                          <h3 className="text-base font-bold text-slate-900">
-                            Findings {hasAnalyzed ? `(${findings.length})` : ''}
-                          </h3>
+                          <h2 id="findings-heading" className="text-base font-bold text-slate-900">
+                            Findings ({findings.length})
+                          </h2>
 
-                          {/* Severity breakdown chips */}
                           {hasAnalyzed && findings.length > 0 && (
-                            <div className="flex items-center gap-1.5 text-xs">
-                              {highCount > 0 && (
-                                <span className="px-2 py-0.5 bg-red-50 text-rose-600 font-semibold rounded border border-red-200">
-                                  {highCount} High
-                                </span>
-                              )}
-                              {mediumCount > 0 && (
-                                <span className="px-2 py-0.5 bg-amber-50 text-amber-600 font-semibold rounded border border-amber-200">
-                                  {mediumCount} Med
-                                </span>
-                              )}
-                              {lowCount > 0 && (
-                                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 font-semibold rounded border border-blue-200">
-                                  {lowCount} Low
-                                </span>
-                              )}
+                            <div className="inline-flex items-center gap-1 text-xs text-slate-500">
+                              <span>Sort by:</span>
+                              <select
+                                className="bg-transparent border border-border-default rounded px-1.5 py-0.5 text-xs font-semibold text-slate-700 cursor-pointer"
+                                value={findingSort}
+                                onChange={(event) => setFindingSort(event.target.value === 'risk-asc' ? 'risk-asc' : 'risk-desc')}
+                                aria-label="Sort findings by risk"
+                              >
+                                <option value="risk-desc">Risk (High to Low)</option>
+                                <option value="risk-asc">Risk (Low to High)</option>
+                              </select>
+                              <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
                             </div>
                           )}
                         </div>
 
-                        {/* Pre-analysis Empty State */}
+                        {analysisMessage && (
+                          <p
+                            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                            role="status"
+                          >
+                            {analysisMessage}
+                          </p>
+                        )}
+
                         {!hasAnalyzed && !loading && (
-                          <div className="py-12 px-4 text-center">
+                          <div className="px-4 py-10 text-center">
                             <div className="w-12 h-12 rounded-full bg-blue-50 text-primary-blue flex items-center justify-center mx-auto mb-3">
                               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                               </svg>
                             </div>
                             <h4 className="text-sm font-bold text-slate-900 mb-1">
-                              Ready for Compliance Review
+                              Findings will appear here
                             </h4>
                             <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                              Paste your marketing content on the left and click &ldquo;⚡ Analyze Content&rdquo; to evaluate brand compliance and view suggested rewrites.
+                              Analyze the content to review findings and available rewrite suggestions.
                             </p>
                           </div>
                         )}
 
-                        {/* Loading State Skeleton */}
                         {loading && (
                           <div className="space-y-3 py-2">
                             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl animate-pulse space-y-2.5">
@@ -761,7 +883,6 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* Zero Findings State */}
                         {hasAnalyzed && !loading && findings.length === 0 && (
                           <div className="py-10 px-4 text-center">
                             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
@@ -770,23 +891,24 @@ export default function App() {
                               </svg>
                             </div>
                             <h4 className="text-sm font-bold text-emerald-800 mb-1">
-                              No Compliance Findings
+                              No findings
                             </h4>
                             <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                              No compliance issues were flagged for this text. Content passes brand compliance guidelines.
+                              The analysis returned no findings for this content.
                             </p>
                           </div>
                         )}
 
-                        {/* Findings List matching mockup */}
                         {hasAnalyzed && !loading && findings.length > 0 && (
-                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                            {findings.map((finding) => (
+                          <div className="space-y-4">
+                            {orderedFindings.map((finding) => (
                               <FindingCard
                                 key={finding.id}
                                 finding={finding}
                                 decision={decisions[finding.id] || 'pending'}
-                                onApply={(replacement) => handleApply(finding, replacement)}
+                                onAcceptAndApply={(replacement) =>
+                                  handleAcceptAndApply(finding, replacement)
+                                }
                                 onReject={() => handleReject(finding.id)}
                                 disabled={isLocked}
                                 content={content}
@@ -794,7 +916,32 @@ export default function App() {
                             ))}
                           </div>
                         )}
-                      </div>
+                      </section>
+                    </div>
+
+                    <div
+                      className="review-summary-resizer"
+                      role="separator"
+                      aria-label="Resize review summary"
+                      aria-orientation="vertical"
+                      aria-controls="review-summary-panel"
+                      aria-valuemin={REVIEW_SUMMARY_MIN_WIDTH}
+                      aria-valuemax={REVIEW_SUMMARY_MAX_WIDTH}
+                      aria-valuenow={summaryWidth}
+                      aria-valuetext={`${summaryWidth} pixels wide`}
+                      tabIndex={0}
+                      onKeyDown={handleSummaryResizeKeyDown}
+                      onPointerDown={startSummaryResize}
+                      onPointerMove={resizeSummary}
+                      onPointerUp={stopSummaryResize}
+                      onPointerCancel={stopSummaryResize}
+                      onLostPointerCapture={() => {
+                        resizeStart.current = null;
+                        setIsResizingSummary(false);
+                      }}
+                    />
+                    <div className="min-w-0 xl:sticky xl:top-6">
+                      <ReviewSummary findings={findings} />
                     </div>
                   </div>
                 </div>
@@ -824,7 +971,6 @@ export default function App() {
                 reviews={allReviews}
                 onRowClick={handleOpenReview}
                 onDelete={handleDeleteReview}
-                onNewReview={handleStartNewReview}
                 loading={tableLoading}
                 error={tableError}
               />
@@ -852,7 +998,6 @@ export default function App() {
                 reviews={allReviews}
                 onRowClick={handleOpenReview}
                 onDelete={handleDeleteReview}
-                onNewReview={handleStartNewReview}
                 loading={tableLoading}
                 error={tableError}
                 defaultStatusFilter="pending_approval"
@@ -878,7 +1023,6 @@ export default function App() {
                 reviews={allReviews}
                 onRowClick={handleOpenReview}
                 onDelete={handleDeleteReview}
-                onNewReview={handleStartNewReview}
                 loading={tableLoading}
                 error={tableError}
                 defaultStatusFilter="approved"
@@ -904,7 +1048,6 @@ export default function App() {
                 reviews={allReviews}
                 onRowClick={handleOpenReview}
                 onDelete={handleDeleteReview}
-                onNewReview={handleStartNewReview}
                 loading={tableLoading}
                 error={tableError}
                 defaultStatusFilter="changes_requested"

@@ -9,6 +9,7 @@ type ContentEditorProps = {
   onRetry: () => void;
   disabled: boolean;
   status: 'draft' | 'pending_approval' | 'approved' | 'changes_requested';
+  hasAnalyzed: boolean;
   isReadOnly?: boolean;
 };
 
@@ -23,6 +24,7 @@ export function ContentEditor({
   onRetry,
   disabled,
   status,
+  hasAnalyzed,
   isReadOnly = false,
 }: ContentEditorProps) {
   const charCount = content.length;
@@ -49,31 +51,30 @@ export function ContentEditor({
       </div>
 
       {/* Textarea container */}
-      <div className="relative flex-1 flex flex-col min-h-[300px]">
+      <div className="relative flex-1 flex flex-col min-h-[190px]">
         <textarea
           value={content}
           onChange={(e) => onChange(e.target.value)}
           disabled={isLocked || disabled}
           placeholder="Paste or write marketing content here..."
-          className={`w-full flex-1 p-4 pb-8 text-sm text-slate-900 border border-border-default rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary-blue/20 focus:border-primary-blue font-sans leading-relaxed transition-all placeholder:text-slate-400 ${
+          aria-label="Marketing content"
+          className={`w-full flex-1 min-h-[190px] p-4 text-sm text-slate-900 border border-border-default rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 font-sans leading-relaxed transition-all placeholder:text-slate-400 ${
             isLocked ? 'bg-slate-50 cursor-not-allowed opacity-90' : 'bg-white'
           }`}
           maxLength={5000}
         />
 
-        {/* Character count at bottom-right of textarea container matching mockup */}
-        <div className="absolute bottom-2.5 right-3 text-xs text-slate-400 pointer-events-none font-sans">
-          {charCount} / 5000
-        </div>
       </div>
 
-      {/* Analyze button matching mockup: ⚡ Analyze Content */}
-      {!isLocked && (
-        <div className="mt-4 pt-1">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs tabular-nums text-slate-500" aria-live="polite">
+          {charCount} / 5000 characters
+        </p>
+        {!isLocked && (
           <button
             onClick={onAnalyze}
             disabled={!content.trim() || disabled || loading}
-            className="w-full bg-primary-blue hover:bg-blue-hover text-white py-3 px-4 rounded-lg font-bold text-sm shadow-sm transition-all flex items-center justify-center gap-2 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             {loading ? (
               <>
@@ -85,13 +86,15 @@ export function ContentEditor({
               </>
             ) : (
               <>
-                <span>⚡</span>
-                <span>Analyze Content</span>
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3 4 14h7l-1 7 10-12h-7l1-6Z" />
+                </svg>
+                <span>{hasAnalyzed ? 'Re-analyze' : 'Analyze Content'}</span>
               </>
             )}
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Slow server alert */}
       {slowServer && (

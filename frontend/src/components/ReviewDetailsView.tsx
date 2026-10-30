@@ -1,18 +1,18 @@
 import { useState } from 'react';
 import { StatusBadge } from './StatusBadge';
 import { FindingCard } from './FindingCard';
-import type { Review, Finding } from '../types';
+import type { Review, Finding, FindingDecision } from '../types';
 
 type ReviewDetailsViewProps = {
   review: Review;
   content: string;
   findings: Finding[];
-  decisions: Record<string, 'pending' | 'applied' | 'rejected'>;
+  decisions: Record<string, FindingDecision>;
   onBack: () => void;
   onSubmit: () => void;
   onApprove: () => void;
   onRequestChanges: () => void;
-  onApply: (finding: Finding, replacement?: string) => void;
+  onAcceptAndApply: (finding: Finding, replacement?: string) => void;
   onReject: (findingId: string) => void;
   onEditWorkspace: () => void;
   isApproverMode: boolean;
@@ -22,6 +22,7 @@ type ReviewDetailsViewProps = {
 function formatFullDate(dateString: string): string {
   try {
     const d = new Date(dateString);
+    if (!Number.isFinite(d.getTime())) return 'Not saved yet';
     return (
       d.toLocaleDateString('en-US', {
         month: 'short',
@@ -49,7 +50,7 @@ export function ReviewDetailsView({
   onSubmit,
   onApprove,
   onRequestChanges,
-  onApply,
+  onAcceptAndApply,
   onReject,
   onEditWorkspace,
   isApproverMode,
@@ -285,7 +286,9 @@ export function ReviewDetailsView({
                     key={finding.id}
                     finding={finding}
                     decision={decisions[finding.id] || 'pending'}
-                    onApply={(replacement) => onApply(finding, replacement)}
+                    onAcceptAndApply={(replacement) =>
+                      onAcceptAndApply(finding, replacement)
+                    }
                     onReject={() => onReject(finding.id)}
                     disabled={review.status === 'approved'}
                     content={content}

@@ -4,6 +4,8 @@ export type FindingCategory = "risk" | "unsupported_claim" | "needs_verification
 export interface RewriteSuggestion {
   text: string;
   requiresVerification: boolean;
+  rationale?: string;
+  uncertainty?: string | null;
 }
 
 export interface Finding {
@@ -13,7 +15,11 @@ export interface Finding {
   evidence: string;
   context?: string;
   targetStart?: number;
+  targetEnd?: number;
   explanation: string;
+  rewriteRationale?: string | null;
+  uncertainty?: string | null;
+  requiresVerification?: boolean;
   replacement: string | null;
   suggestions?: RewriteSuggestion[];
   /** Deprecated backward-compatibility alias */

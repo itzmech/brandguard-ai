@@ -5,6 +5,6 @@
   "compatibility_date": "2026-02-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "ALLOWED_ORIGINS": "https://brandguard-ai-seven.vercel.app,http://localhost:5173,http://localhost:4173"
+    "ALLOWED_ORIGINS": "https://brandguard-ai-seven.vercel.app,http://localhost:5173,http://localhost:4173,http://127.0.0.1:5174"
   }
 }

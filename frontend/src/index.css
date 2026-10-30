@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root {
 	font-family: "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
@@ -31,3 +30,52 @@ button, textarea, input { font: inherit; }
 ::selection { color: #123c2b; background: #bde3cc; }
 
 :focus-visible { outline-color: #17815e; }
+
+.review-workspace-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	align-items: start;
+	gap: 1.5rem;
+}
+
+.review-summary-resizer {
+	display: none;
+}
+
+@media (min-width: 1280px) {
+	.review-workspace-layout {
+		grid-template-columns: minmax(0, 1fr) 12px var(--review-summary-width, 290px);
+	}
+
+	.review-summary-resizer {
+		position: relative;
+		display: block;
+		align-self: stretch;
+		min-height: 100%;
+		cursor: col-resize;
+		touch-action: none;
+		user-select: none;
+	}
+
+	.review-summary-resizer::after {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 5px;
+		width: 2px;
+		border-radius: 2px;
+		background: #cbd5e1;
+		content: "";
+		transition: background-color 120ms ease-out;
+	}
+
+	.review-summary-resizer:hover::after,
+	.review-summary-resizer:focus-visible::after {
+		background: #8b5cf6;
+	}
+
+	.review-summary-resizer:focus-visible {
+		outline: 2px solid #7c3aed;
+		outline-offset: 1px;
+	}
+}

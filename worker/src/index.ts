@@ -12,7 +12,6 @@ import {
 
 const MAX_PAYLOAD_BYTES = 50 * 1024; // 50 KB
 const MAX_CONTENT_LENGTH = 10000; // 10,000 characters
-const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -23,6 +22,7 @@ function getAllowedOrigins(env: Env): string[] {
     "https://brandguard-ai-seven.vercel.app",
     "http://localhost:5173",
     "http://localhost:4173",
+    "http://127.0.0.1:5174",
   ];
   if (env.ALLOWED_ORIGINS) {
     const additional = env.ALLOWED_ORIGINS.split(",").map((s) => s.trim());
@@ -48,6 +48,7 @@ function getCorsHeaders(request: Request, env: Env): Record<string, string> {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
   };
 }
 
@@ -65,100 +66,6 @@ function jsonResponse(
   });
 }
 
-function findEvidencePositions(content: string, evidence: string): number[] {
-  const positions: number[] = [];
-  const normalizedContent = content.toLowerCase();
-  const normalizedEvidence = evidence.toLowerCase();
-  let position = normalizedContent.indexOf(normalizedEvidence);
-
-  while (position !== -1) {
-    positions.push(position);
-    position = normalizedContent.indexOf(normalizedEvidence, position + 1);
-  }
-
-  return positions;
-}
-
-function findFindingPositions(
-  content: string,
-  finding: { evidence: string; context?: string; targetStart?: number }
-): number[] {
-  if (
-    typeof finding.targetStart === "number" &&
-    finding.targetStart >= 0 &&
-    content.slice(finding.targetStart, finding.targetStart + finding.evidence.length) === finding.evidence
-  ) {
-    return [finding.targetStart];
-  }
-
-  if (finding.context) {
-    const contextPositions = findEvidencePositions(content, finding.context);
-    if (contextPositions.length === 1) {
-      const evidencePositions = findEvidencePositions(finding.context, finding.evidence);
-      if (evidencePositions.length === 1) {
-        return [contextPositions[0] + evidencePositions[0]];
-      }
-    }
-  }
-
-  return findEvidencePositions(content, finding.evidence);
-}
-
-function overlapsExisting(
-  content: string,
-  finding: { evidence: string; context?: string; targetStart?: number },
-  accepted: Array<{ evidence: string; context?: string; targetStart?: number }>
-): boolean {
-  const positions = findFindingPositions(content, finding);
-  return accepted.some((existing) => {
-    const existingPositions = findFindingPositions(content, existing);
-    return positions.some((position) =>
-      existingPositions.some(
-        (existingPosition) =>
-          position < existingPosition + existing.evidence.length &&
-          existingPosition < position + finding.evidence.length
-      )
-    );
-  });
-}
-
-function mergeFindings(
-  content: string,
-  rules: Awaited<ReturnType<typeof analyzeWithRules>>,
-  groq: Awaited<ReturnType<typeof analyzeWithGroq>>
-) {
-  const contextualGroqFindings = groq.map((finding) => {
-    const overlappingRules = rules.filter((rule) =>
-      overlapsExisting(content, rule, [finding])
-    );
-    const highestSeverity = [...overlappingRules, finding].reduce(
-      (highest, candidate) =>
-        SEVERITY_ORDER[candidate.severity] < SEVERITY_ORDER[highest]
-          ? candidate.severity
-          : highest,
-      finding.severity
-    );
-    return { ...finding, severity: highestSeverity };
-  });
-  const unmatchedRules = rules.filter(
-    (rule) => !contextualGroqFindings.some((finding) =>
-      overlapsExisting(content, rule, [finding])
-    )
-  );
-  const candidates = [...contextualGroqFindings, ...unmatchedRules].sort(
-    (left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]
-  );
-  const accepted: typeof candidates = [];
-
-  for (const finding of candidates) {
-    if (!overlapsExisting(content, finding, accepted)) {
-      accepted.push(finding);
-    }
-  }
-
-  return accepted;
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const corsHeaders = getCorsHeaders(request, env);
@@ -171,10 +78,10 @@ export default {
       });
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname;
-
     try {
+      const url = new URL(request.url);
+      const path = url.pathname;
+
       // 1. Health check endpoints
       if ((path === "/health" || path === "/api/health") && request.method === "GET") {
         return jsonResponse(
@@ -237,20 +144,25 @@ export default {
 
         const content = body.content;
         const ruleFindings = analyzeWithRules(content);
-        let groqFindings: Awaited<ReturnType<typeof analyzeWithGroq>> = [];
+        let findings: Awaited<ReturnType<typeof analyzeWithGroq>> = ruleFindings;
         let analysisSource = "rules-fallback";
+        let analysisMessage: string | null =
+          "AI analysis is unavailable. These results use deterministic checks only; context-aware rewrites were not generated.";
 
         try {
-          groqFindings = await analyzeWithGroq(content, env);
-          if (groqFindings.length > 0 || ruleFindings.length === 0) {
-            analysisSource = "groq";
-          }
+          findings = await analyzeWithGroq(content, env);
+          analysisSource = "groq";
+          analysisMessage = null;
         } catch {
           analysisSource = "rules-fallback";
         }
 
         return jsonResponse(
-          { findings: mergeFindings(content, ruleFindings, groqFindings) },
+          {
+            findings,
+            analysisSource,
+            analysisMessage,
+          },
           200,
           { ...corsHeaders, "X-Analysis-Source": analysisSource }
         );
