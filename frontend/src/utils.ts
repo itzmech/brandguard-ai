@@ -145,9 +145,6 @@ export function findEvidenceRange(
     })) {
       return { start: targetStart, end: targetStart + evidence.length };
     }
-    if (content.indexOf(context) === -1) {
-      return { start: targetStart, end: targetStart + evidence.length };
-    }
   }
 
   if (context) {

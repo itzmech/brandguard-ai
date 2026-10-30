@@ -61,6 +61,9 @@ export default function App() {
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [reviewStatus, setReviewStatus] = useState<Review['status']>('draft');
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const contentRef = useRef(content);
+  const findingsRef = useRef(findings);
+  const analysisRequestId = useRef(0);
   const appliedFindingIds = useRef(new Set<string>());
   const [sampleIndex, setSampleIndex] = useState(0);
   const [findingSort, setFindingSort] = useState<'risk-desc' | 'risk-asc'>('risk-desc');
@@ -79,6 +82,16 @@ export default function App() {
 
   // Toast notification
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const updateContent = useCallback((nextContent: string) => {
+    contentRef.current = nextContent;
+    setContent(nextContent);
+  }, []);
+
+  const updateFindings = useCallback((nextFindings: Finding[]) => {
+    findingsRef.current = nextFindings;
+    setFindings(nextFindings);
+  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -213,8 +226,8 @@ export default function App() {
         .loadReview(storedId)
         .then((review) => {
           if (ignore) return;
-          setContent(review.content);
-          setFindings(review.findings);
+          updateContent(review.content);
+          updateFindings(review.findings);
           appliedFindingIds.current.clear();
           setReviewId(review.id);
           setReviewStatus(review.status);
@@ -231,14 +244,17 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [updateContent, updateFindings]);
 
   // Handle open review from table or recent reviews
   const handleOpenReview = async (id: string) => {
+    analysisRequestId.current += 1;
+    setLoading(false);
+    setSlowServer(false);
     try {
       const review = await api.loadReview(id);
-      setContent(review.content);
-      setFindings(review.findings);
+      updateContent(review.content);
+      updateFindings(review.findings);
       appliedFindingIds.current.clear();
       setReviewId(review.id);
       setReviewStatus(review.status);
@@ -264,10 +280,13 @@ export default function App() {
 
   // Start a fresh review
   const handleStartNewReview = () => {
+    analysisRequestId.current += 1;
+    setLoading(false);
+    setSlowServer(false);
     localStorage.removeItem('brandguard_review_id');
     localStorage.removeItem('brandguard_decisions_current');
-    setContent('');
-    setFindings([]);
+    updateContent('');
+    updateFindings([]);
     appliedFindingIds.current.clear();
     setError(null);
     setAnalysisMessage(null);
@@ -295,19 +314,26 @@ export default function App() {
 
   // Handle content analysis
   const handleAnalyze = async () => {
-    if (!content.trim()) return;
+    const submittedContent = contentRef.current;
+    if (!submittedContent.trim()) return;
+    const requestId = ++analysisRequestId.current;
     setLoading(true);
     setError(null);
     setAnalysisMessage(null);
     setSlowServer(false);
 
     const timer = setTimeout(() => {
-      setSlowServer(true);
+      if (requestId === analysisRequestId.current) setSlowServer(true);
     }, 5000);
 
     try {
-      const result = await api.analyze(content);
-      setFindings(result.findings);
+      const result = await api.analyze(submittedContent);
+      if (requestId !== analysisRequestId.current) return;
+      if (contentRef.current !== submittedContent) {
+        setError('Content changed while analysis was running. Analyze again to review the latest text.');
+        return;
+      }
+      updateFindings(result.findings);
       appliedFindingIds.current.clear();
       setAnalysisMessage(result.analysisMessage ?? null);
       setHasAnalyzed(true);
@@ -334,11 +360,19 @@ export default function App() {
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred during analysis');
+      if (requestId === analysisRequestId.current) {
+        setError(
+          contentRef.current === submittedContent
+            ? err instanceof Error ? err.message : 'An error occurred during analysis'
+            : 'Content changed while analysis was running. Analyze again to review the latest text.'
+        );
+      }
     } finally {
       clearTimeout(timer);
-      setLoading(false);
-      setSlowServer(false);
+      if (requestId === analysisRequestId.current) {
+        setLoading(false);
+        setSlowServer(false);
+      }
     }
   };
 
@@ -351,9 +385,16 @@ export default function App() {
       return;
     }
 
+    const currentFinding = findingsRef.current.find(({ id }) => id === finding.id);
+    if (!currentFinding) {
+      showToast('This finding is no longer current. Reanalyse the content before applying it.', 'error');
+      return;
+    }
+
+    const currentContent = contentRef.current;
     const result = applyAndAcceptReplacement(
-      content,
-      finding,
+      currentContent,
+      currentFinding,
       decisions[finding.id] ?? 'pending',
       selectedReplacement
     );
@@ -362,10 +403,10 @@ export default function App() {
       return;
     }
     appliedFindingIds.current.add(finding.id);
-    setFindings((current) =>
+    updateFindings(
       invalidateOverlappingFindings(
-        content,
-        current,
+        currentContent,
+        findingsRef.current,
         finding.id,
         result.evidenceStart,
         result.evidenceEnd,
@@ -373,7 +414,7 @@ export default function App() {
         selectedReplacement
       )
     );
-    setContent(result.newContent);
+    updateContent(result.newContent);
     setSavedAt(null);
     setDecisions((prev) => {
       const updated = updateFindingDecision(prev, finding.id, result.decision);
@@ -489,7 +530,7 @@ export default function App() {
 
   // Load sample content into editor
   const handleLoadSample = () => {
-    setContent(samples[sampleIndex].content);
+    updateContent(samples[sampleIndex].content);
     setSampleIndex((sampleIndex + 1) % samples.length);
     showToast(`Loaded ${samples[sampleIndex].name}`);
   };
@@ -497,7 +538,7 @@ export default function App() {
   // Choose template from Templates view
   const handleSelectTemplate = (templateContent: string) => {
     handleStartNewReview();
-    setContent(templateContent);
+    updateContent(templateContent);
     setWorkspaceMode('editor');
     setCurrentView('new-review');
     showToast('Template loaded into editor');
@@ -784,7 +825,7 @@ export default function App() {
                       <ContentEditor
                         content={content}
                         onChange={(updatedContent) => {
-                          setContent(updatedContent);
+                          updateContent(updatedContent);
                           setAnalysisMessage(null);
                         }}
                         onLoadSample={handleLoadSample}
@@ -894,7 +935,7 @@ export default function App() {
                                   handleAcceptAndApply(finding, replacement)
                                 }
                                 onReject={() => handleReject(finding.id)}
-                                disabled={isLocked}
+                                disabled={isLocked || loading || saving}
                                 content={content}
                               />
                             ))}

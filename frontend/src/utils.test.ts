@@ -319,8 +319,12 @@ describe('rewrite data safety', () => {
       }),
     };
 
-    const firstResult = applyReplacement(content, first);
+    const firstResult = applyAndAcceptReplacement(content, first, 'pending');
     assert.equal(firstResult.success, true);
+    if (!firstResult.success) return;
+    const decisions = updateFindingDecision({}, first.id, firstResult.decision);
+    assert.equal(decisions.first, 'accepted');
+    assert.equal(decisions.second, undefined);
     const reanchored = invalidateOverlappingFindings(
       content,
       [first, second],
@@ -334,9 +338,16 @@ describe('rewrite data safety', () => {
       end: firstResult.newContent.indexOf('flagged phrase') + 'flagged phrase'.length,
     });
 
-    const secondResult = applyReplacement(firstResult.newContent, reanchored);
+    const secondResult = applyAndAcceptReplacement(
+      firstResult.newContent,
+      reanchored,
+      decisions.second ?? 'pending'
+    );
     assert.equal(secondResult.success, true);
-    assert.equal(secondResult.newContent, 'First brief edit. Then second edit.');
+    if (secondResult.success) {
+      assert.equal(secondResult.decision, 'accepted');
+      assert.equal(secondResult.newContent, 'First brief edit. Then second edit.');
+    }
   });
 
   it('refuses repeated text when contextual evidence cannot uniquely identify the target', () => {
@@ -351,6 +362,22 @@ describe('rewrite data safety', () => {
     assert.equal(findEvidenceRange(content, ambiguous), null);
     assert.equal(canApply(ambiguous, content), false);
     assert.equal(applyReplacement(content, ambiguous).newContent, content);
+  });
+
+  it('does not trust an exact stale offset when its context disappeared and evidence repeats', () => {
+    const content = 'Updated paragraph: flagged phrase; duplicate flagged phrase.';
+    const stale = finding({
+      evidence: 'flagged phrase',
+      context: 'Original flagged phrase.',
+      targetStart: content.indexOf('flagged phrase'),
+      targetEnd: content.indexOf('flagged phrase') + 'flagged phrase'.length,
+      replacement: 'revised phrase',
+    });
+
+    const result = applyReplacement(content, stale);
+    assert.equal(result.success, false);
+    assert.equal(result.newContent, content);
+    assert.match(result.reason, /not found|ambiguous/i);
   });
 
   it('invalidates overlapping suggestions when another finding replaces their span', () => {
@@ -427,34 +454,61 @@ describe('rewrite data safety', () => {
       },
     });
     const api = await import('./api.ts');
-    const source = 'A headline: the BEST option for teams.';
-    const evidence = 'the BEST';
-    const applied = applyAndAcceptReplacement(
+    const source = 'A headline: the BEST option for teams. Another headline: the WORST choice for teams.';
+    const firstEvidence = 'the BEST';
+    const secondEvidence = 'the WORST';
+    const firstFinding = finding({
+      id: 'first',
+      evidence: firstEvidence,
+      context: 'A headline: the BEST option for teams.',
+      targetStart: source.indexOf(firstEvidence),
+      replacement: 'a suitable',
+    });
+    const secondFinding = finding({
+      id: 'second',
+      evidence: secondEvidence,
+      context: 'Another headline: the WORST choice for teams.',
+      targetStart: source.indexOf(secondEvidence),
+      replacement: 'a different',
+    });
+    const firstApplied = applyAndAcceptReplacement(
       source,
-      finding({
-        evidence,
-        context: source,
-        targetStart: source.indexOf(evidence),
-        targetEnd: source.indexOf(evidence) + evidence.length,
-        replacement: null,
-        suggestions: [{
-          text: 'a suitable',
-          requiresVerification: false,
-        }],
-      }),
+      firstFinding,
       'pending',
+    );
+    assert.equal(firstApplied.success, true);
+    if (!firstApplied.success) return;
+    const reanchoredFindings = invalidateOverlappingFindings(
+      source,
+      [firstFinding, secondFinding],
+      firstFinding.id,
+      firstApplied.evidenceStart,
+      firstApplied.evidenceEnd,
+      firstApplied.newContent,
       'a suitable'
     );
-    assert.equal(applied.success, true);
-    if (!applied.success) return;
-    const revisedContent = applied.newContent;
-    assert.equal(revisedContent, 'A headline: a suitable option for teams.');
+    const secondApplied = applyAndAcceptReplacement(
+      firstApplied.newContent,
+      reanchoredFindings[1],
+      'pending'
+    );
+    assert.equal(secondApplied.success, true);
+    if (!secondApplied.success) return;
+    const revisedContent = secondApplied.newContent;
+    assert.equal(
+      revisedContent,
+      'A headline: a suitable option for teams. Another headline: a different choice for teams.'
+    );
     const fakeId = 'fake-revised-content-test';
 
     api.setFakeMode(true);
     try {
       await api.saveReview(fakeId, revisedContent, [{
-        ...finding({ evidence, replacement: 'a suitable' }),
+        ...firstFinding,
+        replacement: 'a suitable',
+      }, {
+        ...secondFinding,
+        replacement: 'a different',
       }]);
       const restored = await api.loadReview(fakeId);
       assert.equal(restored.content, revisedContent);
